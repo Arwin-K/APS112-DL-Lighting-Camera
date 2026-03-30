@@ -1,0 +1,31 @@
+dataset_roots:
+  nyu_depth_v2: ""
+  mit_intrinsic_images: ""
+  mid_intrinsics: ""
+  fast_sv_indoor_lighting: ""
+  custom_hallway: ""
+
+archive_paths:
+  nyu_depth_v2: ""
+  mit_intrinsic_images: ""
+  mid_intrinsics: ""
+  fast_sv_indoor_lighting: ""
+  custom_hallway: ""
+
+manifests:
+  nyu_depth_v2: ""
+  mit_intrinsic_images: ""
+  mid_intrinsics: ""
+  fast_sv_indoor_lighting: ""
+  custom_hallway: ""
+
+enabled_datasets:
+  - nyu_depth_v2
+  - mit_intrinsic_images
+  - mid_intrinsics
+  - fast_sv_indoor_lighting
+  - custom_hallway
+
+image_size:
+  height: 256
+  width: 256

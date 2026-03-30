@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hallway-lighting"
+version = "0.1.0"
+description = "Colab-first hallway illuminance estimation project with multi-dataset, multi-task PyTorch scaffolding."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+  { name = "OpenAI Codex" }
+]
+dependencies = [
+  "torch>=2.2",
+  "torchvision>=0.17",
+  "PyYAML>=6.0",
+  "numpy>=1.24",
+  "pandas>=2.0",
+  "matplotlib>=3.7",
+  "Pillow>=10.0",
+  "tqdm>=4.66",
+  "scikit-image>=0.22",
+  "onnx>=1.15",
+  "onnxruntime>=1.17",
+]
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["hallway_lighting*"]

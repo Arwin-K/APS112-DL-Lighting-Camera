@@ -1,0 +1,9 @@
+carbon:
+  watts_per_lux_m2: 0.015
+  default_grid_carbon_factor_kg_per_kwh: 0.35
+  default_interval_hours: 1.0
+  use_measured_power_when_available: true
+  report_fields:
+    - estimated_power_w
+    - interval_energy_kwh
+    - interval_carbon_kg

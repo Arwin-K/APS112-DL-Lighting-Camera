@@ -1,0 +1,2 @@
+image_path,split,lux_map_path,floor_mask_path,reflectance_path,shading_path,point_targets_path,measured_power_w,interval_hours,notes
+path/to/hallway_image.png,train,path/to/lux_map.npy,path/to/floor_mask.png,path/to/reflectance.png,path/to/shading.png,path/to/point_targets.json,0.0,1.0,replace_with_real_paths

@@ -1,0 +1,23 @@
+training:
+  batch_size: 4
+  num_workers: 2
+  epochs: 20
+  learning_rate: 0.0003
+  weight_decay: 0.0001
+  amp: true
+  device: cuda
+  save_every: 1
+  validate_every: 1
+
+optimization:
+  optimizer: adamw
+  scheduler: cosine
+  gradient_clip_norm: 1.0
+
+loss_weights:
+  lux_map: 1.0
+  lux_percentiles: 0.2
+  intrinsic: 0.2
+  floor_mask: 0.3
+  uncertainty: 0.1
+  carbon: 0.1
