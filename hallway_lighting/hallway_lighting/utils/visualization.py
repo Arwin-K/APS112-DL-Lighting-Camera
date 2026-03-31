@@ -1,4 +1,4 @@
-"""Visualization helpers for notebook training and evaluation."""
+"""Visualization helpers for notebook training, evaluation, and inference."""
 
 from __future__ import annotations
 
@@ -172,6 +172,64 @@ def save_prediction_figure(
         point_values=point_values,
         title=title,
     )
+    return save_figure(figure, path)
+
+
+def save_heatmap_image(
+    path: str | Path,
+    heatmap: torch.Tensor | np.ndarray,
+    title: str = "Predicted Lux Heatmap",
+) -> Path:
+    """Saves a single heatmap panel to disk."""
+
+    heatmap_np = prepare_display_image(heatmap, denormalize=False)
+    figure, axis = plt.subplots(1, 1, figsize=(5, 4))
+    image_handle = axis.imshow(heatmap_np, cmap="viridis")
+    axis.set_title(title)
+    axis.axis("off")
+    figure.colorbar(image_handle, ax=axis, fraction=0.046, pad=0.04)
+    figure.tight_layout()
+    return save_figure(figure, path)
+
+
+def save_overlay_visualization(
+    path: str | Path,
+    image: torch.Tensor | np.ndarray,
+    heatmap: torch.Tensor | np.ndarray,
+    title: str = "Lux Overlay",
+    alpha: float = 0.45,
+) -> Path:
+    """Saves a heatmap overlay on top of the input image."""
+
+    image_np = prepare_display_image(image)
+    heatmap_np = prepare_display_image(heatmap, denormalize=False)
+    figure, axis = plt.subplots(1, 1, figsize=(6, 4))
+    axis.imshow(image_np)
+    axis.imshow(heatmap_np, cmap="inferno", alpha=alpha)
+    axis.set_title(title)
+    axis.axis("off")
+    figure.tight_layout()
+    return save_figure(figure, path)
+
+
+def save_point_annotation_visualization(
+    path: str | Path,
+    image: torch.Tensor | np.ndarray,
+    points: Sequence[PointTarget],
+    point_values: Mapping[str, float] | None = None,
+    title: str = "Point-wise Hallway Illuminance",
+) -> Path:
+    """Saves point annotations over an image or heatmap."""
+
+    figure, axis = plt.subplots(1, 1, figsize=(6, 4))
+    overlay_points(
+        image=image,
+        points=points,
+        title=title,
+        point_values=point_values,
+        ax=axis,
+    )
+    figure.tight_layout()
     return save_figure(figure, path)
 
 
