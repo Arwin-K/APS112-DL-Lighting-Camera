@@ -8,6 +8,11 @@ training:
   device: cuda
   save_every: 1
   validate_every: 1
+  resume_checkpoint: ""
+  image_size:
+    height: 256
+    width: 256
+  max_visualization_examples: 4
 
 optimization:
   optimizer: adamw
@@ -16,8 +21,13 @@ optimization:
 
 loss_weights:
   lux_map: 1.0
-  lux_percentiles: 0.2
-  intrinsic: 0.2
+  avg_lux: 0.2
+  p5_lux: 0.15
+  p95_lux: 0.15
+  point_lux: 0.15
+  albedo: 0.2
+  gloss: 0.1
   floor_mask: 0.3
   uncertainty: 0.1
   carbon: 0.1
+  power: 0.05

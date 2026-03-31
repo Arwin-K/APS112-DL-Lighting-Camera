@@ -30,7 +30,10 @@ The expected workflow is:
 3. Set dataset input paths in the notebook.
 4. Run dataset preparation and manifest cells.
 5. Preview rows and sample images.
-6. Continue to model setup, training, evaluation, point-wise reporting, and carbon estimation.
+6. Create dataloaders from the saved manifests.
+7. Initialize the model and optionally resume from a checkpoint.
+8. Run training, validation, and test evaluation from the notebook cells.
+9. Inspect saved checkpoints, visualizations, point reports, and history under `runs/notebook_run/`.
 
 ## Supported Datasets
 
@@ -111,6 +114,35 @@ Core normalized fields:
 
 If a source dataset does not provide a field, the manifest leaves it empty. The code does not invent labels that are absent from the source data.
 
+## Notebook Training Flow
+
+The notebook now supports the practical end-to-end execution flow:
+
+1. Load configs and resolve Google Drive dataset paths.
+2. Prepare extracted roots and build normalized manifests.
+3. Load manifests and inspect split counts.
+4. Create train/val/test dataloaders.
+5. Initialize the model, optimizer, scheduler, and AMP scaler.
+6. Optionally resume from a checkpoint.
+7. Run the training loop from the training section.
+8. Run validation or test evaluation on demand.
+9. Visualize predictions and hallway point overlays.
+10. Inspect `best_model.pt`, `last_model.pt`, training history, config snapshots, and saved figures.
+
+The notebook is still the main interface. Helper code in the package exists to keep notebook cells readable, but the intended user flow remains notebook-first.
+
+## Multi-Dataset Supervision Routing
+
+The training helper routes losses by dataset name and available labels:
+
+- NYU Depth V2: floor-related supervision only when a floor target is available.
+- MIT Intrinsic Images: albedo / reflectance-style supervision.
+- MID Intrinsics: albedo plus gloss/specularity supervision when available.
+- Fast Indoor Lighting: appearance-related supervision when official targets are present in the manifest.
+- custom hallway dataset: lux map, scalar lux values, point-wise lux, floor mask, optional albedo/gloss, and optional power-derived carbon supervision.
+
+If a dataset row does not provide a label for a given head, that loss is skipped.
+
 ## Custom Hallway Data
 
 Public datasets do not directly provide hallway lux supervision at under-fixture and between-fixture points. For that reason, custom hallway data is the main route to real hallway-specific performance.
@@ -178,6 +210,23 @@ hallway_lighting/
 pip install -r requirements.txt
 ```
 
+## Running The Notebook
+
+Typical Colab usage:
+
+1. Mount Drive.
+2. Fill `DATASET_INPUTS` with Drive paths.
+3. Run the manifest-building cells.
+4. Confirm the split counts in the manifest loading section.
+5. Run the dataloader and model initialization sections.
+6. Set `RUN_TRAINING = True` in the training section when ready.
+7. Set `RUN_VALIDATION = True` or `RUN_TEST = True` for standalone evaluation passes.
+8. Inspect saved outputs under:
+   - `runs/notebook_run/checkpoints/`
+   - `runs/notebook_run/visualizations/`
+   - `runs/notebook_run/training_history.json`
+   - `runs/notebook_run/config_snapshot/`
+
 ## Current Status
 
 Ready now:
@@ -188,6 +237,7 @@ Ready now:
 - dataset-specific manifest builders for all supported datasets
 - custom hallway manifest and point-target JSON validation
 - notebook cells that prepare datasets, build manifests, preview rows, and visualize example images
+- notebook-integrated dataloader creation, training, validation, testing, visualization, and checkpointing flow
 
 Not added yet:
 

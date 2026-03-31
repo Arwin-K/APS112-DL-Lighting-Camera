@@ -120,6 +120,7 @@ def p95_error(
 def pointwise_lux_error(
     prediction: Mapping[str, torch.Tensor | np.ndarray | float],
     target: Mapping[str, torch.Tensor | np.ndarray | float] | None,
+    valid_mask: Mapping[str, torch.Tensor | np.ndarray] | None = None,
 ) -> float | None:
     """Computes mean absolute point-wise lux error across shared point names."""
 
@@ -133,7 +134,13 @@ def pointwise_lux_error(
     for point_name in shared_names:
         prediction_value = prediction[point_name]
         target_value = target[point_name]
-        point_errors.append(mae(np.asarray(prediction_value), np.asarray(target_value)))
+        point_errors.append(
+            mae(
+                prediction_value,
+                target_value,
+                valid_mask=None if valid_mask is None else valid_mask.get(point_name),
+            )
+        )
     return float(np.mean(point_errors))
 
 
@@ -175,19 +182,36 @@ def multitask_lux_metrics(
     metrics: dict[str, float] = {}
 
     if "lux_map" in outputs and "lux_map" in targets and targets["lux_map"] is not None:
-        metrics["lux_mae"] = mae(outputs["lux_map"], targets["lux_map"], valid_mask=targets.get("floor_mask"))
-        metrics["lux_rmse"] = rmse(outputs["lux_map"], targets["lux_map"], valid_mask=targets.get("floor_mask"))
+        valid_mask = targets.get("lux_map_valid_mask")
+        metrics["lux_mae"] = mae(outputs["lux_map"], targets["lux_map"], valid_mask=valid_mask)
+        metrics["lux_rmse"] = rmse(outputs["lux_map"], targets["lux_map"], valid_mask=valid_mask)
 
     if "avg_lux" in outputs and "avg_lux" in targets and targets["avg_lux"] is not None:
-        metrics["avg_lux_error"] = avg_lux_error(outputs["avg_lux"], targets["avg_lux"])
+        metrics["avg_lux_error"] = avg_lux_error(
+            outputs["avg_lux"],
+            targets["avg_lux"],
+            valid_mask=targets.get("avg_lux_valid_mask"),
+        )
 
     if "low_lux_p5" in outputs and "low_lux_p5" in targets and targets["low_lux_p5"] is not None:
-        metrics["p5_error"] = p5_error(outputs["low_lux_p5"], targets["low_lux_p5"])
+        metrics["p5_error"] = p5_error(
+            outputs["low_lux_p5"],
+            targets["low_lux_p5"],
+            valid_mask=targets.get("low_lux_p5_valid_mask"),
+        )
 
     if "high_lux_p95" in outputs and "high_lux_p95" in targets and targets["high_lux_p95"] is not None:
-        metrics["p95_error"] = p95_error(outputs["high_lux_p95"], targets["high_lux_p95"])
+        metrics["p95_error"] = p95_error(
+            outputs["high_lux_p95"],
+            targets["high_lux_p95"],
+            valid_mask=targets.get("high_lux_p95_valid_mask"),
+        )
 
-    point_error = pointwise_lux_error(outputs.get("point_lux", {}), targets.get("point_lux"))
+    point_error = pointwise_lux_error(
+        outputs.get("point_lux", {}),
+        targets.get("point_lux"),
+        valid_mask=targets.get("point_lux_valid_mask"),
+    )
     if point_error is not None:
         metrics["pointwise_lux_error"] = point_error
 

@@ -45,7 +45,7 @@ def power_regression_loss(
 
 def estimate_energy_from_power(
     predicted_power_w: torch.Tensor,
-    interval_hours: float,
+    interval_hours: float | torch.Tensor,
 ) -> torch.Tensor:
     """Converts predicted power to interval energy."""
 
@@ -55,7 +55,7 @@ def estimate_energy_from_power(
 def estimate_carbon_from_power(
     predicted_power_w: torch.Tensor,
     carbon_factor_kg_per_kwh: float,
-    interval_hours: float,
+    interval_hours: float | torch.Tensor,
 ) -> torch.Tensor:
     """Converts predicted power to interval carbon emissions."""
 
@@ -67,7 +67,7 @@ def carbon_interval_loss(
     predicted_power_w: torch.Tensor,
     target_carbon_kg: torch.Tensor | None,
     carbon_factor_kg_per_kwh: float,
-    interval_hours: float,
+    interval_hours: float | torch.Tensor,
     valid_mask: torch.Tensor | None = None,
     beta: float = 1.0,
 ) -> torch.Tensor:

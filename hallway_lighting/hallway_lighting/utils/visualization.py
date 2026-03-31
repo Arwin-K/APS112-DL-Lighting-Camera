@@ -1,64 +1,55 @@
-"""Visualization helpers used by the notebook."""
+"""Visualization helpers for notebook training and evaluation."""
 
 from __future__ import annotations
 
-from typing import Sequence
+from pathlib import Path
+from typing import Mapping, Sequence
 
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
 from hallway_lighting.data.point_sampling import PointTarget
+from hallway_lighting.data.transforms import denormalize_image
 
 
 def _to_numpy_image(image: torch.Tensor | np.ndarray) -> np.ndarray:
-    """Converts CHW tensors or HWC arrays to a displayable NumPy image."""
+    """Converts tensors or arrays to a displayable NumPy image."""
 
     if isinstance(image, torch.Tensor):
         image = image.detach().cpu().numpy()
 
     image = np.asarray(image)
-    if image.ndim == 3 and image.shape[0] in {1, 3}:
+    if image.ndim == 3 and image.shape[0] in {1, 2, 3}:
         image = np.transpose(image, (1, 2, 0))
-    if image.shape[-1] == 1:
+    if image.ndim == 3 and image.shape[-1] == 1:
         image = image[..., 0]
     return image
+
+
+def prepare_display_image(image: torch.Tensor | np.ndarray, denormalize: bool = True) -> np.ndarray:
+    """Converts a normalized CHW tensor or HWC image to display space."""
+
+    if isinstance(image, torch.Tensor) and denormalize and image.ndim == 3 and image.shape[0] == 3:
+        image = denormalize_image(image).clamp(0.0, 1.0)
+    image_np = _to_numpy_image(image)
+    if image_np.ndim == 2:
+        return image_np
+    return np.clip(image_np, 0.0, 1.0)
 
 
 def show_image(image: torch.Tensor | np.ndarray, title: str = "Image") -> None:
     """Displays a single image."""
 
+    image_np = prepare_display_image(image)
     plt.figure(figsize=(6, 4))
-    plt.imshow(_to_numpy_image(image), cmap="viridis" if _to_numpy_image(image).ndim == 2 else None)
+    plt.imshow(image_np, cmap="gray" if image_np.ndim == 2 else None)
     plt.title(title)
     plt.axis("off")
     plt.show()
 
 
-def show_multitask_example(
-    image: torch.Tensor | np.ndarray,
-    lux_map: torch.Tensor | np.ndarray | None = None,
-    floor_mask: torch.Tensor | np.ndarray | None = None,
-) -> None:
-    """Displays the RGB image alongside optional prediction targets."""
-
-    panels = [("RGB", _to_numpy_image(image))]
-    if lux_map is not None:
-        panels.append(("Lux Map", _to_numpy_image(lux_map)))
-    if floor_mask is not None:
-        panels.append(("Floor Mask", _to_numpy_image(floor_mask)))
-
-    plt.figure(figsize=(5 * len(panels), 4))
-    for index, (title, panel) in enumerate(panels, start=1):
-        plt.subplot(1, len(panels), index)
-        plt.imshow(panel, cmap="viridis" if panel.ndim == 2 else None)
-        plt.title(title)
-        plt.axis("off")
-    plt.tight_layout()
-    plt.show()
-
-
-def plot_pointwise_lux(point_values: dict[str, float]) -> None:
+def plot_pointwise_lux(point_values: Mapping[str, float], title: str = "Point-wise Hallway Illuminance") -> None:
     """Displays point-wise illuminance values as a bar chart."""
 
     names = list(point_values.keys())
@@ -67,21 +58,140 @@ def plot_pointwise_lux(point_values: dict[str, float]) -> None:
     plt.bar(names, values)
     plt.ylabel("Lux")
     plt.xticks(rotation=45, ha="right")
-    plt.title("Point-wise Hallway Illuminance")
+    plt.title(title)
     plt.tight_layout()
     plt.show()
 
 
-def overlay_points(image: torch.Tensor | np.ndarray, points: Sequence[PointTarget]) -> None:
-    """Displays an RGB image with normalized point targets overlaid."""
+def overlay_points(
+    image: torch.Tensor | np.ndarray,
+    points: Sequence[PointTarget],
+    title: str = "Point Targets",
+    point_values: Mapping[str, float] | None = None,
+    ax: plt.Axes | None = None,
+) -> plt.Axes:
+    """Draws normalized point targets over an image or heatmap."""
 
-    array = _to_numpy_image(image)
-    height, width = array.shape[:2]
-    plt.figure(figsize=(6, 4))
-    plt.imshow(array)
+    image_np = prepare_display_image(image, denormalize=False)
+    target_ax = ax or plt.figure(figsize=(6, 4)).add_subplot(111)
+    target_ax.imshow(image_np, cmap="viridis" if image_np.ndim == 2 else None)
+
+    height, width = image_np.shape[:2]
     for point in points:
-        plt.scatter(point.x * (width - 1), point.y * (height - 1), s=50)
-        plt.text(point.x * (width - 1), point.y * (height - 1), point.name, fontsize=8)
-    plt.title("Point Targets")
-    plt.axis("off")
+        x_pixel = point.x * (width - 1)
+        y_pixel = point.y * (height - 1)
+        target_ax.scatter(x_pixel, y_pixel, s=45, c="white", edgecolors="black")
+        if point_values is not None and point.name in point_values:
+            label = f"{point.name}\n{point_values[point.name]:.1f}"
+        else:
+            label = point.name
+        target_ax.text(x_pixel + 4, y_pixel - 4, label, fontsize=8, color="white")
+
+    target_ax.set_title(title)
+    target_ax.axis("off")
+    return target_ax
+
+
+def create_prediction_figure(
+    image: torch.Tensor | np.ndarray,
+    lux_map: torch.Tensor | np.ndarray,
+    floor_mask_pred: torch.Tensor | np.ndarray | None = None,
+    albedo_pred: torch.Tensor | np.ndarray | None = None,
+    gloss_pred: torch.Tensor | np.ndarray | None = None,
+    points: Sequence[PointTarget] | None = None,
+    point_values: Mapping[str, float] | None = None,
+    title: str = "Prediction Overview",
+) -> plt.Figure:
+    """Creates a multi-panel prediction figure for notebook display or saving."""
+
+    panels: list[tuple[str, np.ndarray]] = [
+        ("Input Image", prepare_display_image(image)),
+        ("Predicted Lux", prepare_display_image(lux_map, denormalize=False)),
+    ]
+    if floor_mask_pred is not None:
+        panels.append(("Predicted Floor Mask", prepare_display_image(floor_mask_pred, denormalize=False)))
+    if albedo_pred is not None:
+        panels.append(("Albedo Proxy", prepare_display_image(albedo_pred)))
+    if gloss_pred is not None:
+        panels.append(("Gloss Proxy", prepare_display_image(gloss_pred, denormalize=False)))
+
+    columns = len(panels) + (1 if points is not None else 0)
+    figure, axes = plt.subplots(1, columns, figsize=(4.5 * columns, 4))
+    if columns == 1:
+        axes = [axes]
+
+    for axis, (panel_title, panel_image) in zip(axes, panels, strict=False):
+        axis.imshow(panel_image, cmap="viridis" if panel_image.ndim == 2 else None)
+        axis.set_title(panel_title)
+        axis.axis("off")
+
+    if points is not None:
+        overlay_points(
+            image=prepare_display_image(lux_map, denormalize=False),
+            points=points,
+            title="Point Overlay",
+            point_values=point_values,
+            ax=axes[-1],
+        )
+
+    figure.suptitle(title)
+    figure.tight_layout()
+    return figure
+
+
+def save_figure(figure: plt.Figure, path: str | Path) -> Path:
+    """Saves a matplotlib figure to disk."""
+
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    figure.savefig(path, bbox_inches="tight")
+    plt.close(figure)
+    return path
+
+
+def save_prediction_figure(
+    path: str | Path,
+    image: torch.Tensor | np.ndarray,
+    lux_map: torch.Tensor | np.ndarray,
+    floor_mask_pred: torch.Tensor | np.ndarray | None = None,
+    albedo_pred: torch.Tensor | np.ndarray | None = None,
+    gloss_pred: torch.Tensor | np.ndarray | None = None,
+    points: Sequence[PointTarget] | None = None,
+    point_values: Mapping[str, float] | None = None,
+    title: str = "Prediction Overview",
+) -> Path:
+    """Builds and saves a prediction summary figure."""
+
+    figure = create_prediction_figure(
+        image=image,
+        lux_map=lux_map,
+        floor_mask_pred=floor_mask_pred,
+        albedo_pred=albedo_pred,
+        gloss_pred=gloss_pred,
+        points=points,
+        point_values=point_values,
+        title=title,
+    )
+    return save_figure(figure, path)
+
+
+def show_multitask_example(
+    image: torch.Tensor | np.ndarray,
+    lux_map: torch.Tensor | np.ndarray | None = None,
+    floor_mask: torch.Tensor | np.ndarray | None = None,
+    albedo: torch.Tensor | np.ndarray | None = None,
+    gloss: torch.Tensor | np.ndarray | None = None,
+) -> None:
+    """Displays a simple multitask example."""
+
+    figure = create_prediction_figure(
+        image=image,
+        lux_map=lux_map if lux_map is not None else image,
+        floor_mask_pred=floor_mask,
+        albedo_pred=albedo,
+        gloss_pred=gloss,
+        points=None,
+        title="Multitask Example",
+    )
     plt.show()
+    plt.close(figure)

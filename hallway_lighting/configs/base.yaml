@@ -12,19 +12,13 @@ paths:
 
 model:
   name: hallway_multitask_unet
-  in_channels: 3
-  encoder_channels: [32, 64, 128, 256]
-  decoder_channels: [256, 128, 64, 32]
-  heads:
-    lux_map:
-      out_channels: 1
-    reflectance:
-      out_channels: 1
-    shading:
-      out_channels: 1
-    floor_mask:
-      out_channels: 1
-    uncertainty_log_var:
-      out_channels: 1
-    estimated_power:
-      out_channels: 1
+  encoder_name: resnet18
+  pretrained: false
+  image_channels: 3
+  use_floor_mask_input: false
+  use_coordinate_channels: true
+  decoder_channels: [256, 128, 64, 64]
+  fixture_count: 3
+  floor_y: 0.72
+  point_start_x: 0.2
+  point_end_x: 0.8
