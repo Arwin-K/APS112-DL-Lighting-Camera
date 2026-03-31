@@ -14,6 +14,7 @@ from hallway_lighting.data.transforms import build_image_transform
 from hallway_lighting.utils.carbon import (
     estimate_interval_carbon_kg,
     estimate_interval_energy_kwh,
+    estimate_power_from_lux,
 )
 from hallway_lighting.utils.metrics import summarize_lux_map
 
@@ -57,6 +58,8 @@ def run_single_image_inference(
     device: str = "cpu",
     image_size: tuple[int, int] = (256, 256),
     point_targets: Sequence[PointTarget] | None = None,
+    floor_area_m2: float = 12.0,
+    watts_per_lux_m2: float = 0.015,
     carbon_factor_kg_per_kwh: float = 0.35,
     interval_hours: float = 1.0,
 ) -> InferenceOutput:
@@ -73,7 +76,14 @@ def run_single_image_inference(
     if point_targets:
         point_lux = sample_values_at_points(lux_map, point_targets)
 
-    estimated_power_w = float(outputs["estimated_power_w"].detach().cpu().view(-1)[0])
+    if "estimated_power_w" in outputs:
+        estimated_power_w = float(outputs["estimated_power_w"].detach().cpu().view(-1)[0])
+    else:
+        estimated_power_w = estimate_power_from_lux(
+            avg_lux=float(outputs["avg_lux"].detach().cpu().view(-1)[0]),
+            floor_area_m2=floor_area_m2,
+            watts_per_lux_m2=watts_per_lux_m2,
+        )
     interval_energy_kwh = estimate_interval_energy_kwh(
         power_w=estimated_power_w,
         interval_hours=interval_hours,
