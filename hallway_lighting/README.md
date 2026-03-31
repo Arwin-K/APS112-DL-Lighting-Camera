@@ -120,10 +120,10 @@ The notebook now supports the practical end-to-end execution flow:
 
 1. Load configs and resolve Google Drive dataset paths.
 2. Prepare extracted roots and build normalized manifests.
-3. Load manifests and inspect split counts.
-4. Create train/val/test dataloaders.
+3. Load manifests, inspect split counts, and review label coverage diagnostics.
+4. Create train/val/test dataloaders and inspect one example batch before training.
 5. Initialize the model, optimizer, scheduler, and AMP scaler.
-6. Optionally resume from a checkpoint.
+6. Review the model output summary and optionally resume from a checkpoint.
 7. Run the training loop from the training section.
 8. Run validation or test evaluation on demand.
 9. Visualize predictions and hallway point overlays.
@@ -217,11 +217,12 @@ Typical Colab usage:
 1. Mount Drive.
 2. Fill `DATASET_INPUTS` with Drive paths.
 3. Run the manifest-building cells.
-4. Confirm the split counts in the manifest loading section.
-5. Run the dataloader and model initialization sections.
-6. Set `RUN_TRAINING = True` in the training section when ready.
-7. Set `RUN_VALIDATION = True` or `RUN_TEST = True` for standalone evaluation passes.
-8. Inspect saved outputs under:
+4. Confirm the split counts and coverage diagnostics in the manifest loading section.
+5. Run the dataloader section and inspect the example batch summary.
+6. Run the model initialization section and review the output summary / checkpoint helper.
+7. Set `RUN_TRAINING = True` in the training section when ready.
+8. Set `RUN_VALIDATION = True` or `RUN_TEST = True` for standalone evaluation passes.
+9. Inspect saved outputs under:
    - `runs/notebook_run/checkpoints/`
    - `runs/notebook_run/visualizations/`
    - `runs/notebook_run/training_history.json`
