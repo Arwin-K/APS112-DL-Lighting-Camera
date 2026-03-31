@@ -6,6 +6,6 @@ inference:
     width: 256
   output_dir: runs/inference
   export_onnx_path: runs/exports/hallway_multitask_unet.onnx
-  point_targets_path: templates/point_targets_template.json
+  point_targets_path: ""
   floor_area_m2: 12.0
   interval_hours: 1.0

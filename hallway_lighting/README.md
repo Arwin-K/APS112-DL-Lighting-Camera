@@ -1,84 +1,170 @@
 # Hallway Lighting
 
-Colab-first PyTorch project for hallway floor-plane illuminance estimation with auxiliary appearance, intrinsic-image, segmentation, point-wise reporting, and carbon estimation outputs.
+Colab-first PyTorch project for hallway floor-plane illuminance estimation with auxiliary indoor priors from public datasets and optional hallway-specific supervision.
 
-## What This Project Does
+## What The Project Does
 
-This repository is designed around a single notebook-first workflow for training and evaluating a hallway lighting model that can eventually estimate:
+The main target is hallway lighting estimation. The intended outputs are:
 
-- average floor-plane illuminance (`avg_lux`)
-- lower-end illuminance distribution (`low_lux_p5`)
-- upper-end illuminance distribution (`high_lux_p95`)
-- point-wise illuminance under fixtures
-- point-wise illuminance between fixtures
-- estimated lighting power
-- interval energy use
-- interval carbon emissions
+- `avg_lux`
+- `low_lux_p5`
+- `high_lux_p95`
+- point-wise lux under fixtures
+- point-wise lux between fixtures
+- `estimated_power_w`
+- `interval_energy_kwh`
+- `interval_carbon_kg`
 
-The main learning target is hallway illuminance. Public indoor datasets act as auxiliary priors for geometry, intrinsic decomposition, and lighting appearance. A custom hallway dataset is optional, but it is the expected path to the best hallway-specific performance.
+Carbon is always derived from lighting electricity use, not directly sensed.
 
-## Supported Datasets
+## Main User Interface
 
-The default workflow only assumes these public datasets:
-
-- NYU Depth V2
-- MIT Intrinsic Images
-- MID Intrinsics
-- Fast Spatially-Varying Indoor Lighting Estimation dataset
-- optional custom hallway dataset
-
-No unavailable or gated dataset is part of the default project structure.
-
-## Notebook-First Workflow
-
-The main user interface is:
+The primary interface is the Colab-friendly notebook:
 
 - [`notebooks/hallway_illuminance_train_eval_all_in_one.ipynb`](/Users/ArwinKarir/Desktop/APS112-DL-Lighting-Camera/hallway_lighting/notebooks/hallway_illuminance_train_eval_all_in_one.ipynb)
 
-The notebook is intended to be run in Google Colab. The workflow is:
+The expected workflow is:
 
-1. Install dependencies from `requirements.txt`.
-2. Mount Google Drive.
-3. Point the configs or notebook variables at dataset locations in Drive.
-4. Extract archives if needed.
-5. Generate or validate manifests.
-6. Visualize sample data.
-7. Configure the model and training loop.
-8. Train, validate, and evaluate.
-9. Report point-wise lux and carbon-related outputs.
-10. Save checkpoints and export ONNX for deployment experiments.
+1. Put official dataset files or extracted folders in Google Drive.
+2. Open the notebook in Colab.
+3. Set dataset input paths in the notebook.
+4. Run dataset preparation and manifest cells.
+5. Preview rows and sample images.
+6. Continue to model setup, training, evaluation, point-wise reporting, and carbon estimation.
 
-## Google Drive Path Strategy
+## Supported Datasets
 
-Dataset paths are deliberately not hardcoded.
+Only these datasets are part of the default workflow:
 
-The intended Colab usage is:
+| Dataset | Input Types | What It Contributes | Real Labels Ingested |
+| --- | --- | --- | --- |
+| NYU Depth V2 | extracted folder, `.mat`, `.zip`, `.tar`, `.tar.gz`, `.tgz` | indoor geometry priors | RGB image path, depth path |
+| MIT Intrinsic Images | extracted folder, `.zip`, `.tar`, `.tar.gz`, `.tgz` | reflectance and shading priors | RGB image path, reflectance path, shading path |
+| MID Intrinsics | extracted folder, `.zip`, `.tar`, `.tar.gz`, `.tgz` | intrinsic appearance priors | RGB image path, albedo/reflectance path, shading path, optional gloss/specular path if present |
+| Fast Spatially-Varying Indoor Lighting Estimation dataset | extracted folder, `.zip`, `.tar`, `.tar.gz`, `.tgz` | lighting and appearance priors | RGB image path, optional albedo/gloss references when official files are present |
+| custom hallway dataset | extracted folder containing a manifest CSV, or a direct manifest CSV path | hallway-specific lux, floor, point, and power supervision | only fields actually present in the user CSV |
 
-- keep the repository in Drive or clone it into the Colab runtime
-- place datasets anywhere under Drive
-- set dataset roots through YAML configs or notebook variables
-- save outputs under `runs/`
+No unavailable or gated dataset is assumed.
 
-Example Drive-style paths the user will eventually provide:
+## Google Drive Dataset Setup
 
-```python
-DATASET_ROOTS = {
-    "nyu_depth_v2": "/content/drive/MyDrive/datasets/nyu_depth_v2",
-    "mit_intrinsic_images": "/content/drive/MyDrive/datasets/mit_intrinsic_images",
-    "mid_intrinsics": "/content/drive/MyDrive/datasets/mid_intrinsics",
-    "fast_sv_indoor_lighting": "/content/drive/MyDrive/datasets/fast_sv_indoor_lighting",
-    "custom_hallway": "/content/drive/MyDrive/datasets/custom_hallway",
+Place datasets anywhere in Drive. Paths must be user-provided in the notebook or configs; nothing is hardcoded.
+
+Example layout:
+
+```text
+/content/drive/MyDrive/datasets/
+  nyu_depth_v2/
+    nyu_depth_v2_labeled.mat
+  mit_intrinsic_images/
+    ...official extracted files...
+  mid_intrinsics/
+    ...official extracted files...
+  fast_sv_indoor_lighting/
+    ...official extracted files...
+  custom_hallway/
+    custom_hallway_manifest.csv
+    point_targets/
+    images/
+    lux_maps/
+    floor_masks/
+```
+
+Accepted input paths in the notebook:
+
+- extracted dataset folder
+- `.zip`
+- `.tar`
+- `.tar.gz`
+- `.tgz`
+- `.mat` where applicable, especially NYU Depth V2
+- direct custom hallway manifest CSV for the custom dataset only
+
+The preparation utilities detect the input type, extract archives into a local working directory under `runs/`, stage `.mat` files safely, and return prepared dataset roots that the manifest builders consume.
+
+## Manifest Generation
+
+Every supported dataset is normalized into the same manifest schema so the training notebook can consume a single table format.
+
+Core normalized fields:
+
+- `sample_id`
+- `dataset_name`
+- `split`
+- `image_path`
+- `depth_path`
+- `floor_mask_path`
+- `lux_map_path`
+- `avg_lux`
+- `low_lux_p5`
+- `high_lux_p95`
+- `point_targets_json`
+- `material_label`
+- `floor_finish_label`
+- `albedo_path`
+- `reflectance_path`
+- `shading_path`
+- `gloss_path`
+- `measured_power_w`
+- `interval_hours`
+- `notes`
+
+If a source dataset does not provide a field, the manifest leaves it empty. The code does not invent labels that are absent from the source data.
+
+## Custom Hallway Data
+
+Public datasets do not directly provide hallway lux supervision at under-fixture and between-fixture points. For that reason, custom hallway data is the main route to real hallway-specific performance.
+
+The custom hallway adapter expects a CSV manifest. A template is provided here:
+
+- [`templates/custom_hallway_manifest_template.csv`](/Users/ArwinKarir/Desktop/APS112-DL-Lighting-Camera/hallway_lighting/templates/custom_hallway_manifest_template.csv)
+
+Optional point-wise lux labels can be provided through JSON files referenced by `point_targets_json`. The supported format is:
+
+```json
+{
+  "under_fixture_1": 0.0,
+  "under_fixture_2": 0.0,
+  "between_fixture_1_2": 0.0
 }
 ```
+
+A template is provided here:
+
+- [`templates/point_targets_template.json`](/Users/ArwinKarir/Desktop/APS112-DL-Lighting-Camera/hallway_lighting/templates/point_targets_template.json)
+
+## Real Labels Vs Optional Labels
+
+Real public labels used by the data layer:
+
+- NYU Depth V2: RGB and depth
+- MIT Intrinsic Images: RGB, reflectance, shading
+- MID Intrinsics: RGB, albedo/reflectance, shading, optional gloss/specular if the official files expose it
+- Fast Indoor Lighting: RGB, plus optional appearance-related files when present
+
+Optional hallway labels:
+
+- floor mask
+- lux map
+- average lux statistics
+- point target JSON
+- material label
+- floor finish label
+- albedo
+- gloss
+- measured power
+- interval hours
+
+These hallway fields are only consumed when you provide them.
 
 ## Repository Layout
 
 ```text
 hallway_lighting/
   README.md
+  AGENTS.md
   requirements.txt
   pyproject.toml
-  AGENTS.md
   configs/
   hallway_lighting/
   notebooks/
@@ -86,45 +172,33 @@ hallway_lighting/
   runs/
 ```
 
-## Current Status
-
-This initial scaffold includes:
-
-- a real importable Python package
-- path-driven YAML configs
-- dataset registry and manifest helpers
-- model, losses, metrics, and inference scaffolding
-- a non-empty Colab-friendly notebook with the required sections
-- templates for custom hallway manifests and point-wise targets
-
-Several modules intentionally include targeted TODO sections where dataset-specific training behavior still needs to be implemented. Those TODOs state the intended next behavior rather than leaving empty placeholders.
-
-## Intended Outputs
-
-The project is structured to eventually report:
-
-- `avg_lux`
-- `low_lux_p5`
-- `high_lux_p95`
-- `point_lux_under_fixture`
-- `point_lux_between_fixtures`
-- `estimated_power_w`
-- `interval_energy_kwh`
-- `interval_carbon_kg`
-
-## Quick Start
-
-From Colab or a local environment:
+## Installation
 
 ```bash
 pip install -r requirements.txt
 ```
 
-Then open the notebook and follow the sections in order.
+## Current Status
+
+Ready now:
+
+- dataset input preparation from Drive paths
+- archive extraction for `.zip`, `.tar`, `.tar.gz`, and `.tgz`
+- `.mat` staging for official-file workflows
+- dataset-specific manifest builders for all supported datasets
+- custom hallway manifest and point-target JSON validation
+- notebook cells that prepare datasets, build manifests, preview rows, and visualize example images
+
+Not added yet:
+
+- smoke tests
+- overfit tests
+- automated test infrastructure
+- finalized multi-dataset `Dataset`/`DataLoader` training pipeline
 
 ## Implementation Notes
 
-- Code uses Python type hints.
-- Modules include docstrings and student-readable comments.
-- Carbon is derived from estimated or measured electricity use, not directly sensed.
-- Public datasets are auxiliary priors. Custom hallway supervision is optional but expected to improve hallway-specific performance.
+- Code uses Python type hints and docstrings.
+- Parsing logic is intentionally readable and fails loudly on malformed input.
+- Outputs and prepared artifacts should be stored under `runs/`.
+- Public datasets are auxiliary priors. Custom hallway labels are optional but expected to improve hallway-specific performance.
