@@ -1,0 +1,2 @@
+hallway_lighting/hallway_lighting_runs/checkpoints/*.pt filter=lfs diff=lfs merge=lfs -text
+hallway_lighting/hallway_lighting_runs/exports/*.onnx.data filter=lfs diff=lfs merge=lfs -text
