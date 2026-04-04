@@ -406,6 +406,20 @@ def _build_corridor_geometry(
     )
 
 
+def _floor_row_center_x(
+    row_index: int,
+    floor_mask: np.ndarray | None,
+    corridor: CorridorGeometry,
+) -> float:
+    """Returns the center x-position of the floor at a given row."""
+
+    if floor_mask is not None:
+        floor_columns = np.where(floor_mask[row_index])[0]
+        if floor_columns.size > 0:
+            return float((floor_columns[0] + floor_columns[-1]) / 2.0)
+    return float(corridor.centerline_x[row_index])
+
+
 def _build_corridor_row_profile(
     score_map: np.ndarray,
     search_bottom: int,
@@ -575,9 +589,7 @@ def _project_fixture_points_to_floor(
             floor_columns = np.where(floor_mask[candidate_row])[0]
             if floor_columns.size == 0:
                 continue
-            preferred_x = int(round(center_x))
-            nearest_index = int(np.argmin(np.abs(floor_columns - preferred_x)))
-            snapped_x = float(floor_columns[nearest_index])
+            snapped_x = float((floor_columns[0] + floor_columns[-1]) / 2.0)
             return (
                 float(np.clip(snapped_x / max(1, width - 1), 0.0, 1.0)),
                 float(np.clip(candidate_row / max(1, height - 1), 0.0, 1.0)),
