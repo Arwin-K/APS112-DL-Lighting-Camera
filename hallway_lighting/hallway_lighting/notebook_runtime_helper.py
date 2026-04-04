@@ -274,43 +274,18 @@ def build_overlay_figure(
     measurement_masks = measurement_masks or {}
 
     if fixture_analysis is not None:
-        for region in fixture_analysis.get("between_regions", []):
-            polygon_points = region.get("polygon") or []
-            if polygon_points:
-                polygon_pixels = [
-                    (float(x_value) * (width - 1), float(y_value) * (height - 1))
-                    for x_value, y_value in polygon_points
-                ]
-                axis.add_patch(
-                    Polygon(
-                        polygon_pixels,
-                        closed=True,
-                        facecolor="#80cbc4",
-                        edgecolor="#004d40",
-                        linewidth=1.2,
-                        alpha=0.14,
-                    )
-                )
-
         for fixture in fixture_analysis.get("fixtures", []):
             x_pixel = float(fixture["x"]) * (width - 1)
             y_pixel = float(fixture["y"]) * (height - 1)
             axis.scatter(
                 x_pixel,
                 y_pixel,
-                s=120,
+                s=42,
                 c="#ffee58",
                 edgecolors="black",
-                linewidths=0.9,
-                zorder=3,
-            )
-            axis.text(
-                x_pixel + 6,
-                y_pixel - 6,
-                str(fixture["name"]),
-                color="white",
-                fontsize=8,
-                bbox={"facecolor": "black", "alpha": 0.45, "pad": 2},
+                linewidths=0.7,
+                zorder=2,
+                alpha=0.9,
             )
 
         for point in fixture_analysis.get("point_targets", []):
@@ -324,33 +299,24 @@ def build_overlay_figure(
                 continue
             x_pixel = float(point["x"]) * (width - 1)
             y_pixel = float(point["y"]) * (height - 1)
-            point_color = "#4fc3f7" if point_name.startswith("between_") else "#ffffff"
+            point_color = "#000000" if point_name.startswith("between_") else "#ff1c1c"
 
             mask = measurement_masks.get(point_name)
             if mask is not None and np.any(mask):
                 mask_alpha = np.zeros((height, width, 4), dtype=np.float32)
-                rgba = np.array([0.20, 0.80, 1.00, 0.18], dtype=np.float32)
+                rgba = np.array([0.00, 0.00, 0.00, 0.14], dtype=np.float32)
                 if point_name.startswith("under_"):
-                    rgba = np.array([1.00, 1.00, 1.00, 0.16], dtype=np.float32)
+                    rgba = np.array([1.00, 0.10, 0.10, 0.18], dtype=np.float32)
                 mask_alpha[mask] = rgba
                 axis.imshow(mask_alpha)
 
             axis.scatter(
                 x_pixel,
                 y_pixel,
-                s=48,
+                s=50,
                 c=point_color,
-                edgecolors="black",
+                edgecolors="white" if point_name.startswith("between_") else "black",
                 linewidths=0.8,
-                zorder=4,
-            )
-            axis.text(
-                x_pixel + 4,
-                y_pixel + 10,
-                f"floor {point_name}\n{measurement_value:.1f} lux",
-                color="white",
-                fontsize=7,
-                bbox={"facecolor": "black", "alpha": 0.5, "pad": 2},
                 zorder=5,
             )
 
@@ -368,7 +334,20 @@ def build_overlay_figure(
             zorder=6,
         )
 
-    axis.set_title("Fixture-aware Floor Lux Overlay")
+    axis.text(
+        0.02,
+        0.12,
+        "Red: floor beneath fixtures\nBlack: floor between fixtures",
+        transform=axis.transAxes,
+        ha="left",
+        va="bottom",
+        color="black",
+        fontsize=8,
+        bbox={"facecolor": "white", "alpha": 0.86, "pad": 4},
+        zorder=7,
+    )
+
+    axis.set_title("Corridor Floor Measurement Zones")
     axis.axis("off")
     figure.tight_layout()
     return figure
@@ -549,4 +528,3 @@ def run_uploaded_photo(
         warning_texts=warning_texts,
     )
     return result, figure
-
