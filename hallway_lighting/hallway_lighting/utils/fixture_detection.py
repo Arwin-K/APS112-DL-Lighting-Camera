@@ -122,7 +122,7 @@ def _resolve_floor_mask(floor_mask: np.ndarray | None, height: int, width: int) 
 def _estimate_search_region_bottom(floor_mask: np.ndarray | None, height: int) -> int:
     """Chooses the lower boundary of the ceiling search region."""
 
-    default_bottom = max(1, min(height - 1, int(round(height * 0.68))))
+    default_bottom = max(1, min(height - 1, int(round(height * 0.72))))
     if floor_mask is None or float(floor_mask.mean()) <= 0.01:
         return default_bottom
 
@@ -131,8 +131,13 @@ def _estimate_search_region_bottom(floor_mask: np.ndarray | None, height: int) -
         return default_bottom
 
     floor_top = int(floor_rows[0])
+    # Ignore clearly implausible floor masks that start too high in the image.
+    if floor_top < int(round(height * 0.30)):
+        return default_bottom
+
     padded_bottom = floor_top - max(4, int(round(height * 0.04)))
-    return max(1, min(default_bottom, padded_bottom))
+    min_reasonable_bottom = int(round(height * 0.42))
+    return max(1, min(default_bottom, max(min_reasonable_bottom, padded_bottom)))
 
 
 def _gaussian_kernel1d(sigma: float) -> np.ndarray:
@@ -177,7 +182,11 @@ def _build_column_profile(score_map: np.ndarray, search_bottom: int) -> np.ndarr
     if ceiling_region.size == 0:
         return np.zeros(score_map.shape[1], dtype=np.float32)
 
-    profile = np.max(ceiling_region, axis=0)
+    profile = (
+        0.55 * np.max(ceiling_region, axis=0)
+        + 0.30 * np.percentile(ceiling_region, 90, axis=0)
+        + 0.15 * np.mean(ceiling_region, axis=0)
+    )
     sigma = max(1.0, score_map.shape[1] * 0.012)
     return _smooth_profile(profile=profile, sigma=sigma)
 
@@ -192,7 +201,7 @@ def _detect_profile_peaks(
     if profile.size == 0 or float(profile.max(initial=0.0)) <= 1e-6:
         return [], False
 
-    min_height = max(0.14, float(np.percentile(profile, 88)))
+    min_height = max(0.08, float(np.percentile(profile, 80)))
     candidate_indices: list[int] = []
     for index in range(profile.size):
         left = profile[index - 1] if index > 0 else profile[index]
@@ -208,13 +217,15 @@ def _detect_profile_peaks(
             break
 
     fallback_used = False
-    if not selected:
+    if len(selected) < max(1, min(3, max_fixture_count)):
         fallback_used = True
         suppressed_profile = profile.copy()
+        selected = []
+        absolute_floor = max(0.05, float(np.percentile(profile, 55)))
         for _ in range(max_fixture_count):
             peak_index = int(np.argmax(suppressed_profile))
             peak_value = float(suppressed_profile[peak_index])
-            if peak_value < max(0.18, float(np.percentile(profile, 92))):
+            if peak_value < absolute_floor:
                 break
             selected.append(peak_index)
             left = max(0, peak_index - min_horizontal_gap_px)
@@ -223,6 +234,56 @@ def _detect_profile_peaks(
         selected.sort()
 
     return selected, fallback_used
+
+
+def _derive_peak_positions_from_rows(
+    score_map: np.ndarray,
+    search_bottom: int,
+    min_horizontal_gap_px: int,
+    max_fixture_count: int,
+) -> list[int]:
+    """Builds horizontal peak hypotheses from bright-row responses."""
+
+    ceiling_region = score_map[:search_bottom, :]
+    if ceiling_region.size == 0:
+        return []
+
+    row_scores = np.max(ceiling_region, axis=1)
+    if row_scores.size == 0:
+        return []
+
+    brightest_rows = np.argsort(row_scores)[::-1][: max(4, min(search_bottom, 12))]
+    candidate_columns: list[int] = []
+    min_value = max(0.08, float(np.percentile(ceiling_region, 88)))
+    for row_index in brightest_rows:
+        row = ceiling_region[int(row_index)]
+        for col_index in range(row.shape[0]):
+            left = row[col_index - 1] if col_index > 0 else row[col_index]
+            right = row[col_index + 1] if col_index + 1 < row.shape[0] else row[col_index]
+            if row[col_index] >= min_value and row[col_index] >= left and row[col_index] >= right:
+                candidate_columns.append(col_index)
+
+    if not candidate_columns:
+        return []
+
+    histogram = np.zeros(score_map.shape[1], dtype=np.float32)
+    for col_index in candidate_columns:
+        histogram[col_index] += 1.0
+    histogram = _smooth_profile(histogram, sigma=max(1.0, score_map.shape[1] * 0.01))
+
+    selected: list[int] = []
+    working = histogram.copy()
+    floor_value = max(0.5, float(np.percentile(histogram[histogram > 0], 40))) if np.any(histogram > 0) else 0.0
+    for _ in range(max_fixture_count):
+        peak_index = int(np.argmax(working))
+        peak_value = float(working[peak_index])
+        if peak_value < floor_value:
+            break
+        selected.append(peak_index)
+        left = max(0, peak_index - min_horizontal_gap_px)
+        right = min(working.size, peak_index + min_horizontal_gap_px + 1)
+        working[left:right] = 0.0
+    return sorted(selected)
 
 
 def _estimate_floor_reference_y(
@@ -401,12 +462,20 @@ def infer_fixture_layout(
     score_map = _build_fixture_score_map(rgb)
     score_map[search_bottom:, :] = 0.0
     profile = _build_column_profile(score_map, search_bottom=search_bottom)
-    min_horizontal_gap_px = max(6, int(round(width * min_horizontal_gap_ratio)))
+    min_horizontal_gap_px = max(4, int(round(width * min_horizontal_gap_ratio)))
     peak_positions, fallback_used = _detect_profile_peaks(
         profile=profile,
         min_horizontal_gap_px=min_horizontal_gap_px,
         max_fixture_count=max_fixture_count,
     )
+    if len(peak_positions) < min_fixture_count:
+        peak_positions = _derive_peak_positions_from_rows(
+            score_map=score_map,
+            search_bottom=search_bottom,
+            min_horizontal_gap_px=min_horizontal_gap_px,
+            max_fixture_count=max_fixture_count,
+        )
+        fallback_used = True
     if len(peak_positions) < min_fixture_count:
         return None
 
