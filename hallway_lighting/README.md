@@ -26,6 +26,8 @@ The model and notebook report:
 - `high_lux_p95`
 - `point_lux` under fixtures
 - `point_lux` between fixtures
+- automatic fixture count and approximate fixture locations when enabled at inference time
+- approximate floor area between adjacent detected fixtures
 - optional floor mask prediction
 - optional albedo proxy
 - optional gloss/specularity proxy
@@ -125,7 +127,7 @@ The model is a shared encoder-decoder network:
 - uncertainty head
 - power regression head for downstream carbon reporting
 
-Point-wise lux is not predicted as a separate image branch. It is sampled from the predicted lux map at canonical hallway floor positions:
+Point-wise lux is not predicted as a separate image branch. It is sampled from the predicted lux map at canonical hallway floor positions or, during inference, at automatically detected fixture projections when auto-detection is enabled:
 
 - `under_fixture_1 ... under_fixture_N`
 - `between_fixture_1_2 ... between_fixture_(N-1)_N`
@@ -234,6 +236,7 @@ It supports:
 - lux heatmap export
 - overlay visualization export
 - point-annotation export
+- automatic fixture-layout analysis with inferred count, approximate locations, and between-fixture floor regions
 
 The notebook uses the same helper that later deployment scripts can use.
 

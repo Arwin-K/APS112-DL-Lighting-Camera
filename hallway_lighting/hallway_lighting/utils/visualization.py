@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Mapping, Sequence
 
 import matplotlib.pyplot as plt
+from matplotlib.patches import Polygon
 import numpy as np
 import torch
 
@@ -120,7 +121,7 @@ def create_prediction_figure(
     if columns == 1:
         axes = [axes]
 
-    for axis, (panel_title, panel_image) in zip(axes, panels, strict=False):
+    for axis, (panel_title, panel_image) in zip(axes, panels):
         axis.imshow(panel_image, cmap="viridis" if panel_image.ndim == 2 else None)
         axis.set_title(panel_title)
         axis.axis("off")
@@ -229,6 +230,57 @@ def save_point_annotation_visualization(
         point_values=point_values,
         ax=axis,
     )
+    figure.tight_layout()
+    return save_figure(figure, path)
+
+
+def save_fixture_layout_visualization(
+    path: str | Path,
+    image: torch.Tensor | np.ndarray,
+    fixtures: Sequence[Mapping[str, float | str | tuple[float, float, float, float]]],
+    between_regions: Sequence[Mapping[str, object]] | None = None,
+    title: str = "Detected Fixture Layout",
+) -> Path:
+    """Saves detected fixture locations and between-fixture regions over the input image."""
+
+    image_np = prepare_display_image(image)
+    figure, axis = plt.subplots(1, 1, figsize=(7, 4.5))
+    axis.imshow(image_np)
+
+    height, width = image_np.shape[:2]
+    for region in between_regions or []:
+        polygon_points = region.get("polygon")
+        if not polygon_points:
+            continue
+        polygon_pixels = [
+            (float(x_value) * (width - 1), float(y_value) * (height - 1))
+            for x_value, y_value in polygon_points  # type: ignore[misc]
+        ]
+        axis.add_patch(
+            Polygon(
+                polygon_pixels,
+                closed=True,
+                facecolor="#4db6ac",
+                edgecolor="#00695c",
+                linewidth=1.4,
+                alpha=0.22,
+            )
+        )
+        label_x = float(np.mean([point[0] for point in polygon_pixels]))
+        label_y = float(np.mean([point[1] for point in polygon_pixels[:2]]))
+        region_label = str(region.get("name", "between_region"))
+        axis.text(label_x, label_y, region_label, color="white", fontsize=8, ha="center", va="bottom")
+
+    for fixture in fixtures:
+        x_pixel = float(fixture["x"]) * (width - 1)
+        y_pixel = float(fixture["y"]) * (height - 1)
+        confidence = float(fixture.get("confidence", 0.0))
+        label = f"{fixture.get('name', 'fixture')} ({confidence:.2f})"
+        axis.scatter(x_pixel, y_pixel, s=90, c="#ffd54f", edgecolors="black", linewidths=0.8, zorder=3)
+        axis.text(x_pixel + 6, y_pixel - 6, label, color="white", fontsize=8, zorder=4)
+
+    axis.set_title(title)
+    axis.axis("off")
     figure.tight_layout()
     return save_figure(figure, path)
 

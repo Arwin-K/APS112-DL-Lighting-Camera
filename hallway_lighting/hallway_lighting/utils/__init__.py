@@ -1,6 +1,13 @@
 """Utility modules for training, evaluation, and reporting."""
 
 from .carbon import estimate_interval_carbon_kg, estimate_interval_energy_kwh, estimate_power_from_lux
+from .fixture_detection import (
+    BetweenFixtureRegion,
+    FixtureDetection,
+    FixtureLayout,
+    FixturePointTarget,
+    infer_fixture_layout,
+)
 from .io import ensure_dir, load_yaml, save_checkpoint
 from .geometry import HallwayGeometryConfig, build_coordinate_channels, expand_coordinate_channels
 from .metrics import (
@@ -17,6 +24,10 @@ from .metrics import (
 from .seed import set_seed
 
 __all__ = [
+    "BetweenFixtureRegion",
+    "FixtureDetection",
+    "FixtureLayout",
+    "FixturePointTarget",
     "HallwayGeometryConfig",
     "avg_lux_error",
     "build_coordinate_channels",
@@ -25,6 +36,7 @@ __all__ = [
     "estimate_interval_energy_kwh",
     "estimate_power_from_lux",
     "expand_coordinate_channels",
+    "infer_fixture_layout",
     "load_yaml",
     "mae",
     "multitask_lux_metrics",

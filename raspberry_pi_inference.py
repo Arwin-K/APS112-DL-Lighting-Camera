@@ -7,9 +7,18 @@ Run this on your Raspberry Pi with a camera attached.
 import cv2
 import numpy as np
 import onnxruntime as ort
-from PIL import Image
-import json
 from pathlib import Path
+import sys
+
+REPO_ROOT = Path(__file__).resolve().parent
+PACKAGE_ROOT = REPO_ROOT / "hallway_lighting"
+if PACKAGE_ROOT.exists():
+    sys.path.insert(0, str(PACKAGE_ROOT))
+
+try:
+    from hallway_lighting.utils.fixture_detection import infer_fixture_layout
+except Exception:
+    infer_fixture_layout = None
 
 # Load the ONNX model
 model_path = '/home/jonah/models/hallway_multitask_unet_drive_prototype.onnx'
@@ -40,7 +49,7 @@ def run_inference(image: np.ndarray):
         'lux_map': outputs[0],
         'avg_lux': outputs[1],
         'low_lux_p5': outputs[2],
-        'high_lux_p5': outputs[3],
+        'high_lux_p95': outputs[3],
         'floor_mask_pred': outputs[4],
         'albedo_pred': outputs[5],
         'gloss_pred': outputs[6],
@@ -55,14 +64,34 @@ while True:
         break
 
     # Preprocess
-    processed = preprocess_image(frame, (192,192))
+    target_size = (192, 192)
+    processed = preprocess_image(frame, target_size)
+    display_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    display_rgb = cv2.resize(display_rgb, target_size).astype(np.float32) / 255.0
 
     # Run inference
     results = run_inference(processed)
 
     # Display results (example: average lux)
     avg_lux = float(results['avg_lux'].flatten()[0])
-    print(f"Average Lux: {avg_lux:.2f}")
+    line = f"Average Lux: {avg_lux:.2f}"
+
+    if infer_fixture_layout is not None:
+        floor_mask = results['floor_mask_pred']
+        if isinstance(floor_mask, np.ndarray) and floor_mask.ndim >= 4:
+            floor_mask = floor_mask[0, 0]
+        layout = infer_fixture_layout(
+            image=display_rgb,
+            floor_mask=floor_mask,
+            max_fixture_count=8,
+        )
+        if layout is not None:
+            fixture_locations = ", ".join(
+                f"{fixture.name}@({fixture.x:.2f},{fixture.y:.2f})"
+                for fixture in layout.fixtures
+            )
+            line += f" | Fixtures: {len(layout.fixtures)} [{fixture_locations}]"
+    print(line)
 
     # Optional: Save results or display visualizations
     # ...

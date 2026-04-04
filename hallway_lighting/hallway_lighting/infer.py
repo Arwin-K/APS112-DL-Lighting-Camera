@@ -23,9 +23,11 @@ from hallway_lighting.utils.carbon import (
     estimate_interval_energy_kwh,
     estimate_power_from_lux,
 )
+from hallway_lighting.utils.fixture_detection import infer_fixture_layout
 from hallway_lighting.utils.io import ensure_dir, save_json
 from hallway_lighting.utils.metrics import summarize_lux_map
 from hallway_lighting.utils.visualization import (
+    save_fixture_layout_visualization,
     save_heatmap_image,
     save_overlay_visualization,
     save_point_annotation_visualization,
@@ -63,6 +65,7 @@ class InferenceArtifacts:
     lux_heatmap_image: str | None = None
     overlay_image: str | None = None
     point_overlay_image: str | None = None
+    fixture_layout_image: str | None = None
     prediction_overview_image: str | None = None
 
 
@@ -86,6 +89,7 @@ class InferenceOutput:
     uncertainty_available: bool
     artifacts: InferenceArtifacts
     point_targets: list[dict[str, Any]]
+    fixture_analysis: dict[str, Any] | None
     raw_outputs: dict[str, np.ndarray | float | None]
 
     def to_summary_dict(self) -> dict[str, Any]:
@@ -108,6 +112,7 @@ class InferenceOutput:
             "uncertainty_available": self.uncertainty_available,
             "artifacts": asdict(self.artifacts),
             "point_targets": self.point_targets,
+            "fixture_analysis": self.fixture_analysis,
         }
 
 
@@ -331,7 +336,7 @@ def _run_onnx_forward(
     raw_outputs = session.run(None, {input_name: image_tensor.detach().cpu().numpy()})
     return {
         output_name: output_value
-        for output_name, output_value in zip(ONNX_OUTPUT_NAMES, raw_outputs, strict=False)
+        for output_name, output_value in zip(ONNX_OUTPUT_NAMES, raw_outputs)
     }
 
 
@@ -353,6 +358,9 @@ def _build_inference_output(
     batch: InferenceBatch,
     raw_outputs: Mapping[str, np.ndarray | float],
     point_targets: Sequence[PointTarget],
+    auto_detect_fixtures: bool,
+    manual_point_targets_supplied: bool,
+    max_fixture_count: int,
     output_dir: str | Path | None,
     save_outputs: bool,
     save_point_visualization: bool,
@@ -388,7 +396,22 @@ def _build_inference_output(
             watts_per_lux_m2=watts_per_lux_m2,
         )
 
-    point_lux = sample_values_at_points(lux_map, point_targets)
+    fixture_analysis: dict[str, Any] | None = None
+    effective_point_targets = list(point_targets)
+    if auto_detect_fixtures:
+        detected_layout = infer_fixture_layout(
+            image=batch.resized_rgb,
+            floor_mask=floor_mask_pred,
+            max_fixture_count=max_fixture_count,
+            floor_area_m2=floor_area_m2,
+        )
+        if detected_layout is not None:
+            fixture_analysis = detected_layout.to_summary_dict()
+            fixture_analysis["used_for_point_sampling"] = not manual_point_targets_supplied
+            if not manual_point_targets_supplied and detected_layout.point_targets:
+                effective_point_targets = list(detected_layout.point_targets)
+
+    point_lux = sample_values_at_points(lux_map, effective_point_targets)
     interval_energy_kwh = estimate_interval_energy_kwh(
         power_w=estimated_power_w,
         interval_hours=interval_hours,
@@ -405,7 +428,7 @@ def _build_inference_output(
     artifact_payload = InferenceArtifacts(output_dir=str(output_dir) if output_dir else "")
     point_targets_payload = [
         {"name": point.name, "x": point.x, "y": point.y, "group": point.group}
-        for point in point_targets
+        for point in effective_point_targets
     ]
 
     result = InferenceOutput(
@@ -425,6 +448,7 @@ def _build_inference_output(
         uncertainty_available=uncertainty_map is not None,
         artifacts=artifact_payload,
         point_targets=point_targets_payload,
+        fixture_analysis=fixture_analysis,
         raw_outputs={
             "lux_map": lux_map,
             "floor_mask_pred": floor_mask_pred if floor_mask_pred is not None else None,
@@ -445,6 +469,7 @@ def _build_inference_output(
         heatmap_path = output_dir / f"{image_stem}_lux_heatmap.png"
         overlay_path = output_dir / f"{image_stem}_lux_overlay.png"
         point_overlay_path = output_dir / f"{image_stem}_point_overlay.png"
+        fixture_layout_path = output_dir / f"{image_stem}_fixture_layout.png"
         overview_path = output_dir / f"{image_stem}_prediction_overview.png"
         summary_path = output_dir / f"{image_stem}_summary.json"
 
@@ -454,9 +479,17 @@ def _build_inference_output(
             save_point_annotation_visualization(
                 point_overlay_path,
                 lux_map,
-                point_targets,
+                effective_point_targets,
                 point_values=point_lux,
                 title="Hallway Point-wise Lux",
+            )
+        if fixture_analysis is not None:
+            save_fixture_layout_visualization(
+                fixture_layout_path,
+                batch.resized_rgb,
+                fixtures=fixture_analysis.get("fixtures", []),
+                between_regions=fixture_analysis.get("between_regions", []),
+                title="Detected Fixture Layout",
             )
         save_prediction_figure(
             overview_path,
@@ -465,7 +498,7 @@ def _build_inference_output(
             floor_mask_pred=floor_mask_pred,
             albedo_pred=albedo_pred,
             gloss_pred=gloss_pred,
-            points=point_targets,
+            points=effective_point_targets,
             point_values=point_lux,
             title="Single-image Inference Overview",
         )
@@ -475,6 +508,8 @@ def _build_inference_output(
         result.artifacts.prediction_overview_image = str(overview_path)
         if save_point_visualization:
             result.artifacts.point_overlay_image = str(point_overlay_path)
+        if fixture_analysis is not None:
+            result.artifacts.fixture_layout_image = str(fixture_layout_path)
         result.artifacts.summary_json = str(summary_path)
         save_json(result.to_summary_dict(), summary_path)
 
@@ -493,6 +528,8 @@ def run_single_image_inference(
     point_targets: Sequence[PointTarget] | None = None,
     point_targets_path: str | Path | None = None,
     fixture_count: int = 3,
+    auto_detect_fixtures: bool = True,
+    max_fixture_count: int = 8,
     output_dir: str | Path | None = None,
     save_outputs: bool = True,
     save_point_visualization: bool = True,
@@ -507,11 +544,15 @@ def run_single_image_inference(
     - `point_targets` expects coordinate definitions for sampling.
     - `point_targets_path` should point to a coordinate-based JSON file understood
       by `load_point_targets(...)`.
+    - When `auto_detect_fixtures` is enabled and no manual point targets are
+      supplied, the helper will attempt to infer fixture count and locations
+      directly from the image and use those detected floor projections.
     - The custom hallway dataset's flat point-value JSON is a different file type
       used for supervision, not inference-time sampling coordinates.
     """
 
     batch = preprocess_single_image(image_path=image_path, image_size=image_size)
+    manual_point_targets_supplied = point_targets is not None or bool(point_targets_path)
     resolved_points = _resolve_point_targets(
         point_targets=point_targets,
         point_targets_path=point_targets_path,
@@ -543,6 +584,9 @@ def run_single_image_inference(
         batch=batch,
         raw_outputs=raw_outputs,
         point_targets=resolved_points,
+        auto_detect_fixtures=auto_detect_fixtures,
+        manual_point_targets_supplied=manual_point_targets_supplied,
+        max_fixture_count=max_fixture_count,
         output_dir=output_dir,
         save_outputs=save_outputs,
         save_point_visualization=save_point_visualization,
