@@ -104,6 +104,11 @@ while True:
     # Run inference
     results = run_inference(processed)
 
+    # Debug: print raw outputs
+    print(f"Debug - avg_lux shape: {results['avg_lux'].shape}, value: {results['avg_lux']}")
+    print(f"Debug - low_lux_p5 shape: {results['low_lux_p5'].shape}, value: {results['low_lux_p5']}")
+    print(f"Debug - high_lux_p95 shape: {results['high_lux_p95'].shape}, value: {results['high_lux_p95']}")
+
     # Display results (example: average lux)
     avg_lux = float(results['avg_lux'].flatten()[0])
     low_lux_p5 = float(results['low_lux_p5'].flatten()[0])
