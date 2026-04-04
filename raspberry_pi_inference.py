@@ -9,6 +9,7 @@ import numpy as np
 import onnxruntime as ort
 from pathlib import Path
 import sys
+import time
 
 REPO_ROOT = Path(__file__).resolve().parent
 PACKAGE_ROOT = REPO_ROOT / "hallway_lighting"
@@ -82,6 +83,8 @@ def run_inference(image: np.ndarray):
     }
 
 # Main loop
+last_save_time = 0
+image_counter = 0
 while True:
     ret, frame = cap.read()
     if not ret:
@@ -91,6 +94,15 @@ while True:
     target_size = (MODEL_WIDTH, MODEL_HEIGHT)
     processed, display_rgb = preprocess_image(frame, target_size)
     quality = assess_frame_quality(display_rgb)
+
+    # Save image every 5 seconds
+    current_time = time.time()
+    if current_time - last_save_time > 5:
+        filename = f'presentation_image_{image_counter}.jpg'
+        cv2.imwrite(filename, frame)
+        print(f"Saved {filename}")
+        image_counter += 1
+        last_save_time = current_time
 
     if quality["is_dark_frame"]:
         print(
