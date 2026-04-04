@@ -100,7 +100,7 @@ while True:
     if current_time - last_save_time > 5:
         filename = f'presentation_image_{image_counter}.jpg'
         cv2.imwrite(filename, frame)
-        print(f"Saved {filename}")
+        # print(f"Saved {filename}")
         image_counter += 1
         last_save_time = current_time
 
