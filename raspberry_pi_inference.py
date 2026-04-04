@@ -109,10 +109,16 @@ while True:
     print(f"Debug - low_lux_p5 shape: {results['low_lux_p5'].shape}, value: {results['low_lux_p5']}")
     print(f"Debug - high_lux_p95 shape: {results['high_lux_p95'].shape}, value: {results['high_lux_p95']}")
 
+    # Compute percentiles from lux_map instead of model outputs
+    lux_map = results['lux_map']
+    if lux_map.ndim > 2:
+        lux_map = lux_map[0, 0]  # assume batch=1, channel=1
+    lux_values = lux_map.flatten()
+    low_lux_p5 = float(np.percentile(lux_values, 5))
+    high_lux_p95 = float(np.percentile(lux_values, 95))
+
     # Display results (example: average lux)
     avg_lux = float(results['avg_lux'].flatten()[0])
-    low_lux_p5 = float(results['low_lux_p5'].flatten()[0])
-    high_lux_p95 = float(results['high_lux_p95'].flatten()[0])
     line = f"Average Lux: {avg_lux:.2f} | Low Lux P5: {low_lux_p5:.2f} | High Lux P95: {high_lux_p95:.2f}"
 
     if infer_fixture_layout is not None:
