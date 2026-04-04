@@ -238,6 +238,21 @@ It supports:
 - point-annotation export
 - automatic fixture-layout analysis with inferred count, approximate locations, and between-fixture floor regions
 
+For a quick local laptop test against an exported ONNX, use:
+
+- [`notebooks/local_photo_onnx_fixture_test.ipynb`](/Users/ArwinKarir/Desktop/APS112-DL-Lighting-Camera/hallway_lighting/notebooks/local_photo_onnx_fixture_test.ipynb)
+
+The notebook lets you upload one photo from your laptop, runs the exported ONNX, detects fixtures, reports:
+
+- lux directly under each detected fixture
+- lux at the midpoint between adjacent fixtures
+- inferred fixture count
+
+It also saves:
+
+- an annotated overlay image showing detected fixtures, under-fixture lux points, and between-fixture lux points
+- a JSON summary with `point_lux` and `fixture_analysis`
+
 The notebook uses the same helper that later deployment scripts can use.
 
 ## ONNX Export
