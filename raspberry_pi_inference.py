@@ -61,7 +61,7 @@ while True:
     results = run_inference(processed)
 
     # Display results (example: average lux)
-    avg_lux = float(results['avg_lux'][0])
+    avg_lux = float(results['avg_lux'].flatten()[0])
     print(f"Average Lux: {avg_lux:.2f}")
 
     # Optional: Save results or display visualizations
