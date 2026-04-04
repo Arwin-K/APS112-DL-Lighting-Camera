@@ -39,6 +39,7 @@ class FixturePointTarget:
     x: float
     y: float
     group: str
+    surface: str = "floor"
 
 
 @dataclass(frozen=True)
@@ -522,6 +523,7 @@ def _refine_fixture_position(
 def _project_fixture_points_to_floor(
     fixtures: Sequence[FixtureDetection],
     corridor: CorridorGeometry,
+    floor_mask: np.ndarray | None,
     height: int,
     width: int,
 ) -> list[FixturePointTarget]:
@@ -549,15 +551,51 @@ def _project_fixture_points_to_floor(
             ordered_rows[index] = max(ordered_rows[index], ordered_rows[index - 1] + min_step)
         ordered_rows = np.clip(ordered_rows, corridor.floor_top_row, corridor.floor_bottom_row)
 
+    def snap_floor_point(projected_row: float) -> tuple[float, float]:
+        row_index = int(np.clip(round(projected_row), corridor.floor_top_row, corridor.floor_bottom_row))
+        center_x = float(corridor.centerline_x[row_index])
+
+        if floor_mask is None:
+            return (
+                float(np.clip(center_x / max(1, width - 1), 0.0, 1.0)),
+                float(np.clip(projected_row / max(1, height - 1), 0.0, 1.0)),
+            )
+
+        search_order = [row_index]
+        max_offset = max(1, int(round(height * 0.03)))
+        for offset in range(1, max_offset + 1):
+            below = min(corridor.floor_bottom_row, row_index + offset)
+            above = max(corridor.floor_top_row, row_index - offset)
+            if below not in search_order:
+                search_order.append(below)
+            if above not in search_order:
+                search_order.append(above)
+
+        for candidate_row in search_order:
+            floor_columns = np.where(floor_mask[candidate_row])[0]
+            if floor_columns.size == 0:
+                continue
+            preferred_x = int(round(center_x))
+            nearest_index = int(np.argmin(np.abs(floor_columns - preferred_x)))
+            snapped_x = float(floor_columns[nearest_index])
+            return (
+                float(np.clip(snapped_x / max(1, width - 1), 0.0, 1.0)),
+                float(np.clip(candidate_row / max(1, height - 1), 0.0, 1.0)),
+            )
+
+        return (
+            float(np.clip(center_x / max(1, width - 1), 0.0, 1.0)),
+            float(np.clip(projected_row / max(1, height - 1), 0.0, 1.0)),
+        )
+
     point_targets: list[FixturePointTarget] = []
     for index, projected_row in enumerate(ordered_rows, start=1):
-        row_index = int(round(projected_row))
-        center_x = float(corridor.centerline_x[row_index])
+        point_x, point_y = snap_floor_point(float(projected_row))
         point_targets.append(
             FixturePointTarget(
                 name=f"under_fixture_{index}",
-                x=float(np.clip(center_x / max(1, width - 1), 0.0, 1.0)),
-                y=float(np.clip(projected_row / max(1, height - 1), 0.0, 1.0)),
+                x=point_x,
+                y=point_y,
                 group="under_fixture",
             )
         )
@@ -566,13 +604,12 @@ def _project_fixture_points_to_floor(
         left_row = point_targets[index].y * max(1, height - 1)
         right_row = point_targets[index + 1].y * max(1, height - 1)
         midpoint_row = (left_row + right_row) / 2.0
-        midpoint_index = int(round(midpoint_row))
-        center_x = float(corridor.centerline_x[midpoint_index])
+        point_x, point_y = snap_floor_point(float(midpoint_row))
         point_targets.append(
             FixturePointTarget(
                 name=f"between_fixture_{index + 1}_{index + 2}",
-                x=float(np.clip(center_x / max(1, width - 1), 0.0, 1.0)),
-                y=float(np.clip(midpoint_row / max(1, height - 1), 0.0, 1.0)),
+                x=point_x,
+                y=point_y,
                 group="between_fixture",
             )
         )
@@ -795,6 +832,7 @@ def infer_fixture_layout(
     point_targets = _project_fixture_points_to_floor(
         fixtures=fixtures,
         corridor=corridor,
+        floor_mask=floor_mask_np,
         height=height,
         width=width,
     )
