@@ -291,7 +291,3 @@ The repository is ready for practical use once you provide:
 - at least one hallway image for final single-image inference
 
 For strong hallway-specific results, custom hallway lux supervision still matters most.
-
-## Repository Rules
-
-See [`AGENTS.md`](/Users/ArwinKarir/Desktop/APS112-DL-Lighting-Camera/hallway_lighting/AGENTS.md) for repo-specific implementation rules.
