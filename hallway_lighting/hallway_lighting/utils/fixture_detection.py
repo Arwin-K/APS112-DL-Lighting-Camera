@@ -68,6 +68,17 @@ class FixtureLayout:
         }
 
 
+@dataclass(frozen=True)
+class CorridorGeometry:
+    """Simple hallway geometry derived from the floor mask."""
+
+    centerline_x: np.ndarray
+    left_edge_x: np.ndarray
+    right_edge_x: np.ndarray
+    floor_top_row: int
+    floor_bottom_row: int
+
+
 def _ensure_rgb_float(image: np.ndarray) -> np.ndarray:
     """Normalizes an image array to HxWx3 float space in [0, 1]."""
 
@@ -167,8 +178,10 @@ def _build_fixture_score_map(image: np.ndarray) -> np.ndarray:
     luminance = 0.2126 * rgb[..., 0] + 0.7152 * rgb[..., 1] + 0.0722 * rgb[..., 2]
     saturation = np.max(rgb, axis=-1) - np.min(rgb, axis=-1)
 
-    horizontal_detail = np.abs(rgb - np.roll(rgb, 1, axis=1)).mean(axis=-1)
-    vertical_detail = np.abs(rgb - np.roll(rgb, 1, axis=0)).mean(axis=-1)
+    horizontal_detail = np.zeros(rgb.shape[:2], dtype=np.float32)
+    vertical_detail = np.zeros(rgb.shape[:2], dtype=np.float32)
+    horizontal_detail[:, 1:] = np.abs(rgb[:, 1:, :] - rgb[:, :-1, :]).mean(axis=-1)
+    vertical_detail[1:, :] = np.abs(rgb[1:, :, :] - rgb[:-1, :, :]).mean(axis=-1)
     local_detail = np.clip(horizontal_detail + vertical_detail, 0.0, 1.0)
 
     score = 0.70 * luminance + 0.20 * local_detail - 0.18 * saturation
@@ -305,6 +318,267 @@ def _estimate_floor_reference_y(
     return float(np.clip(sampling_y / max(1, height - 1), 0.0, 1.0))
 
 
+def _build_corridor_geometry(
+    floor_mask: np.ndarray | None,
+    height: int,
+    width: int,
+) -> CorridorGeometry:
+    """Builds centerline and floor-edge estimates for a hallway scene."""
+
+    row_indices = np.arange(height, dtype=np.float32)
+    default_center = np.full(height, (width - 1) / 2.0, dtype=np.float32)
+    default_left = np.full(height, width * 0.25, dtype=np.float32)
+    default_right = np.full(height, width * 0.75, dtype=np.float32)
+
+    if floor_mask is None or float(floor_mask.mean()) <= 0.01:
+        return CorridorGeometry(
+            centerline_x=default_center,
+            left_edge_x=default_left,
+            right_edge_x=default_right,
+            floor_top_row=int(round(height * 0.55)),
+            floor_bottom_row=height - 1,
+        )
+
+    floor_rows = np.where(floor_mask.any(axis=1))[0]
+    if floor_rows.size == 0:
+        return CorridorGeometry(
+            centerline_x=default_center,
+            left_edge_x=default_left,
+            right_edge_x=default_right,
+            floor_top_row=int(round(height * 0.55)),
+            floor_bottom_row=height - 1,
+        )
+
+    center_samples: list[float] = []
+    width_samples: list[float] = []
+    sample_rows: list[float] = []
+    for row_index in floor_rows:
+        columns = np.where(floor_mask[int(row_index)])[0]
+        if columns.size == 0:
+            continue
+        left = float(columns[0])
+        right = float(columns[-1])
+        center = (left + right) / 2.0
+        center_samples.append(center)
+        width_samples.append(max(1.0, right - left))
+        sample_rows.append(float(row_index))
+
+    if not sample_rows:
+        return CorridorGeometry(
+            centerline_x=default_center,
+            left_edge_x=default_left,
+            right_edge_x=default_right,
+            floor_top_row=int(round(height * 0.55)),
+            floor_bottom_row=height - 1,
+        )
+
+    rows_np = np.asarray(sample_rows, dtype=np.float32)
+    center_np = np.asarray(center_samples, dtype=np.float32)
+    width_np = np.asarray(width_samples, dtype=np.float32)
+
+    if rows_np.size >= 2:
+        center_coeff = np.polyfit(rows_np, center_np, deg=1)
+        centerline_x = np.polyval(center_coeff, row_indices).astype(np.float32)
+        width_coeff = np.polyfit(rows_np, width_np, deg=1)
+        fitted_width = np.polyval(width_coeff, row_indices).astype(np.float32)
+    else:
+        centerline_x = np.full(height, center_np[0], dtype=np.float32)
+        fitted_width = np.full(height, width_np[0], dtype=np.float32)
+
+    min_width = max(width * 0.10, float(np.percentile(width_np, 15)) * 0.75)
+    max_width = width * 0.95
+    fitted_width = np.clip(fitted_width, min_width, max_width)
+    left_edge_x = centerline_x - fitted_width / 2.0
+    right_edge_x = centerline_x + fitted_width / 2.0
+    centerline_x = np.clip(centerline_x, 0.0, width - 1.0)
+    left_edge_x = np.clip(left_edge_x, 0.0, width - 2.0)
+    right_edge_x = np.clip(right_edge_x, 1.0, width - 1.0)
+    right_edge_x = np.maximum(right_edge_x, left_edge_x + 1.0)
+    centerline_x = np.clip(centerline_x, left_edge_x, right_edge_x)
+
+    return CorridorGeometry(
+        centerline_x=centerline_x,
+        left_edge_x=left_edge_x,
+        right_edge_x=right_edge_x,
+        floor_top_row=int(floor_rows[0]),
+        floor_bottom_row=int(floor_rows[-1]),
+    )
+
+
+def _build_corridor_row_profile(
+    score_map: np.ndarray,
+    search_bottom: int,
+    corridor: CorridorGeometry,
+) -> np.ndarray:
+    """Builds a vertical response profile along the hallway centerline."""
+
+    height, width = score_map.shape
+    profile = np.zeros(height, dtype=np.float32)
+    for row_index in range(search_bottom):
+        center_x = float(corridor.centerline_x[row_index])
+        corridor_width = float(corridor.right_edge_x[row_index] - corridor.left_edge_x[row_index])
+        window_radius = int(round(max(width * 0.04, min(width * 0.16, corridor_width * 0.22))))
+        left = max(0, int(round(center_x)) - window_radius)
+        right = min(width, int(round(center_x)) + window_radius + 1)
+        if right <= left:
+            continue
+        strip = score_map[row_index, left:right]
+        if strip.size == 0:
+            continue
+
+        positions = np.arange(left, right, dtype=np.float32)
+        distance = np.abs(positions - center_x)
+        weights = np.clip(1.0 - distance / max(1.0, float(window_radius)), 0.15, 1.0)
+        weighted_strip = strip * weights
+        profile[row_index] = (
+            0.78 * float(np.max(weighted_strip))
+            + 0.14 * float(np.mean(weighted_strip))
+            + 0.08 * float(np.percentile(weighted_strip, 90))
+        )
+
+    sigma = max(1.0, search_bottom * 0.008)
+    return _smooth_profile(profile[:search_bottom], sigma=sigma)
+
+
+def _detect_vertical_peaks(
+    profile: np.ndarray,
+    max_fixture_count: int,
+    min_vertical_gap_px: int,
+) -> tuple[list[int], bool]:
+    """Detects fixture rows along the corridor depth axis."""
+
+    if profile.size == 0 or float(profile.max(initial=0.0)) <= 1e-6:
+        return [], False
+
+    threshold = max(0.025, float(profile.max()) * 0.22, float(np.percentile(profile, 52)))
+    candidate_rows: list[int] = []
+    for row_index in range(profile.size):
+        left = profile[row_index - 1] if row_index > 0 else profile[row_index]
+        right = profile[row_index + 1] if row_index + 1 < profile.size else profile[row_index]
+        if profile[row_index] >= threshold and profile[row_index] >= left and profile[row_index] >= right:
+            candidate_rows.append(row_index)
+
+    selected: list[int] = []
+    for row_index in candidate_rows:
+        if not selected:
+            selected.append(row_index)
+            continue
+        if row_index - selected[-1] < min_vertical_gap_px:
+            if float(profile[row_index]) > float(profile[selected[-1]]):
+                selected[-1] = row_index
+            continue
+        selected.append(row_index)
+        if len(selected) >= max_fixture_count:
+            break
+
+    fallback_used = False
+    if len(selected) < max(1, min(3, max_fixture_count)):
+        fallback_used = True
+        working = profile.copy()
+        selected = []
+        floor_value = max(0.04, float(np.percentile(profile, 40)))
+        for _ in range(max_fixture_count):
+            peak_row = int(np.argmax(working))
+            peak_value = float(working[peak_row])
+            if peak_value < floor_value:
+                break
+            selected.append(peak_row)
+            top = max(0, peak_row - min_vertical_gap_px)
+            bottom = min(working.size, peak_row + min_vertical_gap_px + 1)
+            working[top:bottom] = 0.0
+
+    return sorted(selected), fallback_used
+
+
+def _refine_fixture_position(
+    score_map: np.ndarray,
+    row_index: int,
+    corridor: CorridorGeometry,
+    search_bottom: int,
+) -> tuple[int, int, float]:
+    """Refines a fixture candidate around the corridor centerline."""
+
+    height, width = score_map.shape
+    center_x = float(corridor.centerline_x[row_index])
+    corridor_width = float(corridor.right_edge_x[row_index] - corridor.left_edge_x[row_index])
+    x_radius = int(round(max(width * 0.04, min(width * 0.16, corridor_width * 0.24))))
+    y_radius = max(3, int(round(search_bottom * 0.025)))
+
+    top = max(0, row_index - y_radius)
+    bottom = min(search_bottom, row_index + y_radius + 1)
+    left = max(0, int(round(center_x)) - x_radius)
+    right = min(width, int(round(center_x)) + x_radius + 1)
+    patch = score_map[top:bottom, left:right]
+    if patch.size == 0:
+        return int(round(center_x)), row_index, 0.0
+
+    patch_y, patch_x = np.unravel_index(int(np.argmax(patch)), patch.shape)
+    peak_y = top + int(patch_y)
+    peak_x = left + int(patch_x)
+    confidence = float(np.clip(score_map[peak_y, peak_x], 0.0, 1.0))
+    return peak_x, peak_y, confidence
+
+
+def _project_fixture_points_to_floor(
+    fixtures: Sequence[FixtureDetection],
+    corridor: CorridorGeometry,
+    height: int,
+    width: int,
+) -> list[FixturePointTarget]:
+    """Projects fixtures onto the hallway floor along corridor depth."""
+
+    if not fixtures:
+        return []
+
+    search_bottom_row = min(corridor.floor_top_row - 1, int(round(height * 0.72)))
+    search_bottom_row = max(1, search_bottom_row)
+    floor_span = max(1.0, float(corridor.floor_bottom_row - corridor.floor_top_row))
+    source_span = max(1.0, float(search_bottom_row))
+
+    projected_rows: list[float] = []
+    for fixture in fixtures:
+        fixture_row = fixture.y * max(1, height - 1)
+        depth_ratio = np.clip(fixture_row / source_span, 0.0, 1.0)
+        projected_row = corridor.floor_top_row + (depth_ratio**1.35) * floor_span
+        projected_rows.append(float(projected_row))
+
+    ordered_rows = np.asarray(projected_rows, dtype=np.float32)
+    if ordered_rows.size > 1:
+        min_step = max(2.0, floor_span * 0.04)
+        for index in range(1, ordered_rows.size):
+            ordered_rows[index] = max(ordered_rows[index], ordered_rows[index - 1] + min_step)
+        ordered_rows = np.clip(ordered_rows, corridor.floor_top_row, corridor.floor_bottom_row)
+
+    point_targets: list[FixturePointTarget] = []
+    for index, projected_row in enumerate(ordered_rows, start=1):
+        row_index = int(round(projected_row))
+        center_x = float(corridor.centerline_x[row_index])
+        point_targets.append(
+            FixturePointTarget(
+                name=f"under_fixture_{index}",
+                x=float(np.clip(center_x / max(1, width - 1), 0.0, 1.0)),
+                y=float(np.clip(projected_row / max(1, height - 1), 0.0, 1.0)),
+                group="under_fixture",
+            )
+        )
+
+    for index in range(len(point_targets) - 1):
+        left_row = point_targets[index].y * max(1, height - 1)
+        right_row = point_targets[index + 1].y * max(1, height - 1)
+        midpoint_row = (left_row + right_row) / 2.0
+        midpoint_index = int(round(midpoint_row))
+        center_x = float(corridor.centerline_x[midpoint_index])
+        point_targets.append(
+            FixturePointTarget(
+                name=f"between_fixture_{index + 1}_{index + 2}",
+                x=float(np.clip(center_x / max(1, width - 1), 0.0, 1.0)),
+                y=float(np.clip(midpoint_row / max(1, height - 1), 0.0, 1.0)),
+                group="between_fixture",
+            )
+        )
+    return point_targets
+
+
 def _local_peak_y(score_map: np.ndarray, search_bottom: int, peak_x: int, window_radius: int) -> int:
     """Finds the best vertical position for a fixture near a horizontal peak."""
 
@@ -389,30 +663,36 @@ def _project_points_to_floor(
 
 
 def _build_between_regions(
-    fixtures: Sequence[FixtureDetection],
+    point_targets: Sequence[FixturePointTarget],
+    corridor: CorridorGeometry,
     floor_mask: np.ndarray | None,
-    floor_reference_y: float,
     floor_area_m2: float | None,
     height: int,
     width: int,
 ) -> list[BetweenFixtureRegion]:
-    """Creates simple floor-plane regions between adjacent fixtures."""
+    """Creates simple floor-plane regions between adjacent projected points."""
 
-    if len(fixtures) < 2:
+    under_points = [point for point in point_targets if point.group == "under_fixture"]
+    if len(under_points) < 2:
         return []
-
-    floor_reference_row = int(round(floor_reference_y * max(1, height - 1)))
     floor_pixels = int(floor_mask.sum()) if floor_mask is not None else 0
 
     regions: list[BetweenFixtureRegion] = []
-    for index, (left, right) in enumerate(zip(fixtures[:-1], fixtures[1:]), start=1):
-        left_x = int(round(left.x * max(1, width - 1)))
-        right_x = int(round(right.x * max(1, width - 1)))
-        if right_x < left_x:
-            left_x, right_x = right_x, left_x
+    for index, (left, right) in enumerate(zip(under_points[:-1], under_points[1:]), start=1):
+        top_row = int(round(left.y * max(1, height - 1)))
+        bottom_row = int(round(right.y * max(1, height - 1)))
+        if bottom_row < top_row:
+            top_row, bottom_row = bottom_row, top_row
 
+        top_left_x = float(corridor.left_edge_x[top_row])
+        top_right_x = float(corridor.right_edge_x[top_row])
+        bottom_left_x = float(corridor.left_edge_x[bottom_row])
+        bottom_right_x = float(corridor.right_edge_x[bottom_row])
         region_mask = np.zeros((height, width), dtype=bool)
-        region_mask[floor_reference_row:, left_x : right_x + 1] = True
+        for row_index in range(top_row, bottom_row + 1):
+            left_x = int(round(corridor.left_edge_x[row_index]))
+            right_x = int(round(corridor.right_edge_x[row_index]))
+            region_mask[row_index, left_x : right_x + 1] = True
         if floor_mask is not None:
             region_mask &= floor_mask
 
@@ -423,16 +703,28 @@ def _build_between_regions(
             estimated_area_m2 = float(floor_area_m2 * (area_pixels / float(floor_pixels)))
 
         polygon = [
-            (float(np.clip(left.x, 0.0, 1.0)), floor_reference_y),
-            (float(np.clip(right.x, 0.0, 1.0)), floor_reference_y),
-            (float(np.clip(right.x, 0.0, 1.0)), 1.0),
-            (float(np.clip(left.x, 0.0, 1.0)), 1.0),
+            (
+                float(np.clip(top_left_x / max(1, width - 1), 0.0, 1.0)),
+                float(np.clip(top_row / max(1, height - 1), 0.0, 1.0)),
+            ),
+            (
+                float(np.clip(top_right_x / max(1, width - 1), 0.0, 1.0)),
+                float(np.clip(top_row / max(1, height - 1), 0.0, 1.0)),
+            ),
+            (
+                float(np.clip(bottom_right_x / max(1, width - 1), 0.0, 1.0)),
+                float(np.clip(bottom_row / max(1, height - 1), 0.0, 1.0)),
+            ),
+            (
+                float(np.clip(bottom_left_x / max(1, width - 1), 0.0, 1.0)),
+                float(np.clip(bottom_row / max(1, height - 1), 0.0, 1.0)),
+            ),
         ]
         regions.append(
             BetweenFixtureRegion(
                 name=f"between_fixture_{index}_{index + 1}",
-                left_fixture=left.name,
-                right_fixture=right.name,
+                left_fixture=f"fixture_{index}",
+                right_fixture=f"fixture_{index + 1}",
                 polygon=polygon,
                 area_pixels=area_pixels,
                 area_ratio=area_ratio,
@@ -459,37 +751,31 @@ def infer_fixture_layout(
     if search_bottom <= 1:
         return None
 
+    corridor = _build_corridor_geometry(floor_mask_np, height=height, width=width)
     score_map = _build_fixture_score_map(rgb)
     score_map[search_bottom:, :] = 0.0
-    profile = _build_column_profile(score_map, search_bottom=search_bottom)
-    min_horizontal_gap_px = max(4, int(round(width * min_horizontal_gap_ratio)))
-    peak_positions, fallback_used = _detect_profile_peaks(
-        profile=profile,
-        min_horizontal_gap_px=min_horizontal_gap_px,
-        max_fixture_count=max_fixture_count,
+    profile = _build_corridor_row_profile(
+        score_map=score_map,
+        search_bottom=search_bottom,
+        corridor=corridor,
     )
-    if len(peak_positions) < min_fixture_count:
-        peak_positions = _derive_peak_positions_from_rows(
-            score_map=score_map,
-            search_bottom=search_bottom,
-            min_horizontal_gap_px=min_horizontal_gap_px,
-            max_fixture_count=max_fixture_count,
-        )
-        fallback_used = True
-    if len(peak_positions) < min_fixture_count:
+    min_vertical_gap_px = max(5, int(round(height * 0.035)))
+    peak_rows, fallback_used = _detect_vertical_peaks(
+        profile=profile,
+        max_fixture_count=max_fixture_count,
+        min_vertical_gap_px=min_vertical_gap_px,
+    )
+    if len(peak_rows) < min_fixture_count:
         return None
 
-    floor_reference_y = _estimate_floor_reference_y(floor_mask_np, height=height)
-    window_radius = max(3, min_horizontal_gap_px // 2)
     fixtures: list[FixtureDetection] = []
-    for index, peak_x in enumerate(peak_positions, start=1):
-        peak_y = _local_peak_y(
+    for index, peak_row in enumerate(peak_rows, start=1):
+        peak_x, peak_y, confidence = _refine_fixture_position(
             score_map=score_map,
+            row_index=peak_row,
+            corridor=corridor,
             search_bottom=search_bottom,
-            peak_x=peak_x,
-            window_radius=window_radius,
         )
-        confidence = float(np.clip(profile[peak_x], 0.0, 1.0))
         fixtures.append(
             FixtureDetection(
                 name=f"fixture_{index}",
@@ -501,22 +787,32 @@ def infer_fixture_layout(
                     peak_x=peak_x,
                     peak_y=peak_y,
                     search_bottom=search_bottom,
-                    window_radius=window_radius,
+                    window_radius=max(3, int(round(width * 0.04))),
                 ),
             )
         )
 
-    point_targets = _project_points_to_floor(fixtures=fixtures, floor_reference_y=floor_reference_y)
-    between_regions = _build_between_regions(
+    point_targets = _project_fixture_points_to_floor(
         fixtures=fixtures,
+        corridor=corridor,
+        height=height,
+        width=width,
+    )
+    if not point_targets:
+        return None
+
+    under_points = [point for point in point_targets if point.group == "under_fixture"]
+    floor_reference_y = under_points[0].y if under_points else _estimate_floor_reference_y(floor_mask_np, height=height)
+    between_regions = _build_between_regions(
+        point_targets=point_targets,
+        corridor=corridor,
         floor_mask=floor_mask_np,
-        floor_reference_y=floor_reference_y,
         floor_area_m2=floor_area_m2,
         height=height,
         width=width,
     )
     return FixtureLayout(
-        source="automatic_fixture_detector",
+        source="automatic_corridor_fixture_detector",
         fallback_used=fallback_used,
         search_region_bottom_y=float(search_bottom / max(1, height - 1)),
         floor_reference_y=floor_reference_y,
