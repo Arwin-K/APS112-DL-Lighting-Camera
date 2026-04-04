@@ -55,7 +55,7 @@ while True:
         break
 
     # Preprocess
-    processed = preprocess_image(frame)
+    processed = preprocess_image(frame, (192,192))
 
     # Run inference
     results = run_inference(processed)
