@@ -20,12 +20,35 @@ try:
 except Exception:
     infer_fixture_layout = None
 
+IMAGENET_MEAN = np.asarray([0.485, 0.456, 0.406], dtype=np.float32).reshape(1, 1, 3)
+IMAGENET_STD = np.asarray([0.229, 0.224, 0.225], dtype=np.float32).reshape(1, 1, 3)
+DARK_FRAME_MEAN_THRESHOLD = 0.03
+DARK_FRAME_P95_THRESHOLD = 0.08
+
 # Load the ONNX model
 model_path = '/home/jonah/models/hallway_multitask_unet_drive_prototype.onnx'
 session = ort.InferenceSession(model_path)
+input_shape = session.get_inputs()[0].shape
+MODEL_HEIGHT = int(input_shape[2])
+MODEL_WIDTH = int(input_shape[3])
 
 # Camera setup (adjust for your camera)
 cap = cv2.VideoCapture(0)  # 0 for default camera
+
+def assess_frame_quality(display_rgb: np.ndarray) -> dict[str, float | bool]:
+    """Computes simple brightness checks before trusting model outputs."""
+
+    luminance = 0.2126 * display_rgb[..., 0] + 0.7152 * display_rgb[..., 1] + 0.0722 * display_rgb[..., 2]
+    mean_luminance = float(np.mean(luminance))
+    p95_luminance = float(np.percentile(luminance, 95))
+    return {
+        "mean_luminance": mean_luminance,
+        "p95_luminance": p95_luminance,
+        "is_dark_frame": bool(
+            mean_luminance < DARK_FRAME_MEAN_THRESHOLD
+            and p95_luminance < DARK_FRAME_P95_THRESHOLD
+        ),
+    }
 
 def preprocess_image(image: np.ndarray, target_size=(256, 256)):
     """Preprocess image for model input."""
@@ -33,13 +56,14 @@ def preprocess_image(image: np.ndarray, target_size=(256, 256)):
     image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
     # Resize
     image = cv2.resize(image, target_size)
-    # Normalize to [0,1]
-    image = image.astype(np.float32) / 255.0
+    display_rgb = image.astype(np.float32) / 255.0
+    # Match training-time ImageNet normalization.
+    image = (display_rgb - IMAGENET_MEAN) / IMAGENET_STD
     # Transpose to CHW
     image = np.transpose(image, (2, 0, 1))
     # Add batch dimension
     image = np.expand_dims(image, 0)
-    return image
+    return image, display_rgb
 
 def run_inference(image: np.ndarray):
     """Run model inference."""
@@ -64,10 +88,18 @@ while True:
         break
 
     # Preprocess
-    target_size = (192, 192)
-    processed = preprocess_image(frame, target_size)
-    display_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    display_rgb = cv2.resize(display_rgb, target_size).astype(np.float32) / 255.0
+    target_size = (MODEL_WIDTH, MODEL_HEIGHT)
+    processed, display_rgb = preprocess_image(frame, target_size)
+    quality = assess_frame_quality(display_rgb)
+
+    if quality["is_dark_frame"]:
+        print(
+            "Average Lux: 0.00 | Frame too dark for reliable inference "
+            f"(mean={quality['mean_luminance']:.3f}, p95={quality['p95_luminance']:.3f})"
+        )
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+        continue
 
     # Run inference
     results = run_inference(processed)
