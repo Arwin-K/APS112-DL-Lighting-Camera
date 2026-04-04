@@ -12,7 +12,7 @@ import json
 from pathlib import Path
 
 # Load the ONNX model
-model_path = 'path/to/your/model.onnx'  # Update with actual path
+model_path = '/home/jonah/models/hallway_multitask_unet_drive_prototype.onnx'
 session = ort.InferenceSession(model_path)
 
 # Camera setup (adjust for your camera)
