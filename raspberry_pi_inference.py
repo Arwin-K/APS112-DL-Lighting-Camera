@@ -104,11 +104,6 @@ while True:
     # Run inference
     results = run_inference(processed)
 
-    # Debug: print raw outputs
-    print(f"Debug - avg_lux shape: {results['avg_lux'].shape}, value: {results['avg_lux']}")
-    print(f"Debug - low_lux_p5 shape: {results['low_lux_p5'].shape}, value: {results['low_lux_p5']}")
-    print(f"Debug - high_lux_p95 shape: {results['high_lux_p95'].shape}, value: {results['high_lux_p95']}")
-
     # Compute percentiles from lux_map instead of model outputs
     lux_map = results['lux_map']
     if lux_map.ndim > 2:
