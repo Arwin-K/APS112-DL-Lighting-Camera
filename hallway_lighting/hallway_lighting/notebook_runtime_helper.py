@@ -30,6 +30,15 @@ EXPECTED_ONNX_OUTPUT_NAMES = [
     "uncertainty_map",
     "estimated_power_w",
 ]
+HARDCODED_HALLWAY_POINT_TARGETS = [
+    {"name": "between_fixture_1_2", "x": 0.507, "y": 0.526, "group": "between_fixture", "surface": "floor"},
+    {"name": "under_fixture_2", "x": 0.511, "y": 0.554, "group": "under_fixture", "surface": "floor"},
+    {"name": "between_fixture_2_3", "x": 0.507, "y": 0.582, "group": "between_fixture", "surface": "floor"},
+    {"name": "under_fixture_3", "x": 0.511, "y": 0.624, "group": "under_fixture", "surface": "floor"},
+    {"name": "between_fixture_3_4", "x": 0.507, "y": 0.668, "group": "between_fixture", "surface": "floor"},
+    {"name": "under_fixture_4", "x": 0.511, "y": 0.752, "group": "under_fixture", "surface": "floor"},
+    {"name": "between_fixture_4_5", "x": 0.507, "y": 0.836, "group": "between_fixture", "surface": "floor"},
+]
 
 
 def load_onnx_session(onnx_path: Path):
@@ -204,6 +213,48 @@ def _build_under_fixture_mask(
     return mask
 
 
+def _build_floor_point_mask(
+    point: dict[str, Any],
+    floor_mask: np.ndarray | None,
+    height: int,
+    width: int,
+) -> np.ndarray:
+    """Builds a small floor measurement patch around a hardcoded floor point."""
+
+    mask = _build_under_fixture_mask(point, floor_mask=floor_mask, height=height, width=width)
+    if point.get("group") == "between_fixture":
+        center_x = float(point["x"]) * (width - 1)
+        center_y = float(point["y"]) * (height - 1)
+        mask = _build_disc_mask(
+            height=height,
+            width=width,
+            center_x=center_x,
+            center_y=center_y,
+            radius_x=max(4.0, width * 0.045),
+            radius_y=max(3.0, height * 0.018),
+        )
+        if floor_mask is not None:
+            mask &= floor_mask
+    return mask
+
+
+def build_hardcoded_hallway_fixture_analysis() -> dict[str, Any]:
+    """Returns the fixed floor-point layout derived from the user's reference hallway image."""
+
+    point_targets = [dict(item) for item in HARDCODED_HALLWAY_POINT_TARGETS]
+    fixture_count = sum(1 for item in point_targets if item["group"] == "under_fixture")
+    return {
+        "source": "hardcoded_reference_floor_points",
+        "fallback_used": False,
+        "inferred_fixture_count": fixture_count,
+        "search_region_bottom_y": None,
+        "floor_reference_y": None,
+        "fixtures": [],
+        "point_targets": point_targets,
+        "between_regions": [],
+    }
+
+
 def compute_floor_measurements(
     lux_map: np.ndarray,
     floor_mask: np.ndarray | None,
@@ -224,11 +275,13 @@ def compute_floor_measurements(
 
     for point in point_targets:
         point_name = str(point["name"])
-        if point.get("group") != "under_fixture":
-            continue
-        mask = _build_under_fixture_mask(point, floor_mask=floor_mask, height=height, width=width)
+        point_group = str(point.get("group") or "")
+        mask = _build_floor_point_mask(point, floor_mask=floor_mask, height=height, width=width)
         measurement_masks[point_name] = mask
-        under_fixture_lux[point_name] = _sample_mask_mean(lux_map, mask)
+        if point_group == "under_fixture":
+            under_fixture_lux[point_name] = _sample_mask_mean(lux_map, mask)
+        elif point_group == "between_fixture":
+            between_fixture_lux[point_name] = _sample_mask_mean(lux_map, mask)
 
     for region in between_regions:
         region_name = str(region["name"])
@@ -315,6 +368,7 @@ def build_overlay_figure(
 
         for point in fixture_analysis.get("point_targets", []):
             point_name = str(point["name"])
+            point_group = str(point.get("group") or "")
             measurement_value = _find_measurement_value(
                 point_name,
                 under_fixture_lux=under_fixture_lux,
@@ -324,14 +378,15 @@ def build_overlay_figure(
                 continue
             x_pixel = float(point["x"]) * (width - 1)
             y_pixel = float(point["y"]) * (height - 1)
-            point_color = "#4fc3f7" if point_name.startswith("between_") else "#ffffff"
+            point_color = "#000000" if point_group == "between_fixture" else "#ff2d2d"
+            edge_color = "white" if point_group == "between_fixture" else "black"
 
             mask = measurement_masks.get(point_name)
             if mask is not None and np.any(mask):
                 mask_alpha = np.zeros((height, width, 4), dtype=np.float32)
-                rgba = np.array([0.20, 0.80, 1.00, 0.12], dtype=np.float32)
-                if point_name.startswith("under_"):
-                    rgba = np.array([1.00, 1.00, 1.00, 0.10], dtype=np.float32)
+                rgba = np.array([0.00, 0.00, 0.00, 0.14], dtype=np.float32)
+                if point_group == "under_fixture":
+                    rgba = np.array([1.00, 0.10, 0.10, 0.12], dtype=np.float32)
                 mask_alpha[mask] = rgba
                 axis.imshow(mask_alpha)
 
@@ -340,7 +395,7 @@ def build_overlay_figure(
                 y_pixel,
                 s=48,
                 c=point_color,
-                edgecolors="black",
+                edgecolors=edge_color,
                 linewidths=0.8,
                 zorder=4,
             )
@@ -490,13 +545,10 @@ def run_uploaded_photo(
                 "Predicted floor area is very small in this frame, so floor measurements may be unreliable."
             )
 
-    fixture_layout = infer_fixture_layout(
-        image=display_rgb,
-        floor_mask=floor_mask_binary,
-        max_fixture_count=max_fixture_count,
-        floor_area_m2=floor_area_m2,
+    fixture_analysis = build_hardcoded_hallway_fixture_analysis()
+    warning_texts.append(
+        "Hardcoded hallway floor-point preset enabled. Use the same corridor and camera framing as the reference image."
     )
-    fixture_analysis = None if fixture_layout is None else fixture_layout.to_summary_dict()
 
     under_fixture_lux, between_fixture_lux, measurement_masks = compute_floor_measurements(
         lux_map=lux_map,
@@ -507,12 +559,7 @@ def run_uploaded_photo(
 
     if fixture_analysis is None or int(fixture_analysis.get("inferred_fixture_count", 0)) == 0:
         warning_texts.append(
-            "No fixtures were found in this frame. Use an end-to-end hallway image with visible floor "
-            "and increase Max fixtures if needed."
-        )
-    elif int(fixture_analysis.get("inferred_fixture_count", 0)) >= int(max_fixture_count):
-        warning_texts.append(
-            "Detected fixture count reached the Max fixtures cap. Increase that value if your hallway has more fixtures."
+            "No hardcoded floor measurement points were available for this frame."
         )
 
     lux_summary = summarize_lux_map(lux_map=lux_map, floor_mask=floor_mask_binary)
