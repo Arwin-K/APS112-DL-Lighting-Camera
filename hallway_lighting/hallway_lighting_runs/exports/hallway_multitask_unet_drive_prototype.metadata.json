@@ -1,0 +1,53 @@
+{
+  "onnx_path": "/content/drive/MyDrive/hallway_lighting_runs/exports/hallway_multitask_unet_drive_prototype.onnx",
+  "input_shape": [
+    1,
+    3,
+    192,
+    192
+  ],
+  "output_names": [
+    "lux_map",
+    "avg_lux",
+    "low_lux_p5",
+    "high_lux_p95",
+    "floor_mask_pred",
+    "albedo_pred",
+    "gloss_pred",
+    "uncertainty_map",
+    "estimated_power_w"
+  ],
+  "fixture_count": 3,
+  "point_targets": [
+    {
+      "name": "under_fixture_1",
+      "x": 0.2,
+      "y": 0.72,
+      "group": "under_fixture"
+    },
+    {
+      "name": "under_fixture_2",
+      "x": 0.5,
+      "y": 0.72,
+      "group": "under_fixture"
+    },
+    {
+      "name": "under_fixture_3",
+      "x": 0.8,
+      "y": 0.72,
+      "group": "under_fixture"
+    },
+    {
+      "name": "between_fixture_1_2",
+      "x": 0.35,
+      "y": 0.72,
+      "group": "between_fixture"
+    },
+    {
+      "name": "between_fixture_2_3",
+      "x": 0.65,
+      "y": 0.72,
+      "group": "between_fixture"
+    }
+  ]
+}
