@@ -1,4 +1,4 @@
-"""Dataset utilities for hallway lighting estimation."""
+"""Dataset utilities for hallway lighting"""
 
 from .custom_hallway import build_custom_hallway_manifest, load_point_target_values
 from .dataset_registry import (
