@@ -16,7 +16,7 @@ This repository contains implementations and experiments our design prototype, f
 ## Project Structure
 
 ```
-├── notebooks/          # Jupyter notebooks for exploration and analysis
+├── notebooks/         # Jupyter notebooks for exploration and analysis
 ├── src/               # Core Python modules and utilities
 ├── models/            # Pre-trained and trained model weights
 ├── data/              # Dataset storage and preprocessing
