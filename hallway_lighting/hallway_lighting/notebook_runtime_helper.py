@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from io import BytesIO
 import json
 from pathlib import Path
@@ -14,7 +15,9 @@ import numpy as np
 from PIL import Image
 
 MODEL_FILENAME = "hallway_multitask_unet_drive_prototype.onnx"
-COLAB_PROJECT_ROOT = Path("/content/APS112-DL-Lighting-Camera/hallway_lighting")
+PROJECT_ROOT = Path(os.getenv("LUMISENSE_PROJECT_ROOT", Path(__file__).resolve().parents[2]))
+DEFAULT_ONNX_PATH = Path(os.getenv("LUMISENSE_ONNX_MODEL_PATH", str(PROJECT_ROOT / "hallway_lighting_runs" / "exports" / MODEL_FILENAME)))
+COLAB_PROJECT_ROOT = PROJECT_ROOT
 IMAGENET_MEAN = np.asarray([0.485, 0.456, 0.406], dtype=np.float32).reshape(1, 1, 3)
 IMAGENET_STD = np.asarray([0.229, 0.224, 0.225], dtype=np.float32).reshape(1, 1, 3)
 DARK_FRAME_MEAN_THRESHOLD = 0.03

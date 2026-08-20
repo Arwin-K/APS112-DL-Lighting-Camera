@@ -6,7 +6,15 @@ Colab-first PyTorch project for hallway floor-plane illuminance estimation, poin
 
 The primary user workflow is the notebook:
 
-- [`notebooks/hallway_illuminance_train_eval_all_in_one.ipynb`](/Users/ArwinKarir/Desktop/APS112-DL-Lighting-Camera/hallway_lighting/notebooks/hallway_illuminance_train_eval_all_in_one.ipynb)
+- [notebooks/hallway_illuminance_train_eval_all_in_one.ipynb](notebooks/hallway_illuminance_train_eval_all_in_one.ipynb)
+
+Set your machine-specific paths in environment variables before running anything:
+
+```bash
+export LUMISENSE_PROJECT_ROOT="/absolute/path/to/LumiSense"
+export LUMISENSE_ONNX_MODEL_PATH="/absolute/path/to/model.onnx"
+export LUMISENSE_OUTPUT_DIR="/absolute/path/to/inference_outputs"
+```
 
 The intended flow is:
 
@@ -154,8 +162,8 @@ Public datasets do not directly provide real hallway lux labels at under-fixture
 
 Templates:
 
-- [`templates/custom_hallway_manifest_template.csv`](/Users/ArwinKarir/Desktop/APS112-DL-Lighting-Camera/hallway_lighting/templates/custom_hallway_manifest_template.csv)
-- [`templates/point_targets_template.json`](/Users/ArwinKarir/Desktop/APS112-DL-Lighting-Camera/hallway_lighting/templates/point_targets_template.json)
+- [templates/custom_hallway_manifest_template.csv](templates/custom_hallway_manifest_template.csv)
+- [templates/point_targets_template.json](templates/point_targets_template.json)
 
 Supported point-target JSON format:
 
@@ -225,7 +233,7 @@ The notebook evaluation sections report:
 
 ## Inference
 
-The package provides a shared inference helper in [`hallway_lighting/infer.py`](/Users/ArwinKarir/Desktop/APS112-DL-Lighting-Camera/hallway_lighting/hallway_lighting/infer.py).
+The package provides a shared inference helper in [hallway_lighting/infer.py](hallway_lighting/infer.py).
 
 It supports:
 
@@ -240,7 +248,7 @@ It supports:
 
 For a quick local laptop test against an exported ONNX, use:
 
-- [`notebooks/local_photo_onnx_fixture_test.ipynb`](/Users/ArwinKarir/Desktop/APS112-DL-Lighting-Camera/hallway_lighting/notebooks/local_photo_onnx_fixture_test.ipynb)
+- [notebooks/local_photo_onnx_fixture_test.ipynb](notebooks/local_photo_onnx_fixture_test.ipynb)
 
 The notebook lets you upload one photo from your laptop, runs the exported ONNX, detects fixtures, reports:
 
@@ -260,7 +268,7 @@ The notebook uses the same helper that later deployment scripts can use.
 You can export from:
 
 - the notebook ONNX section
-- [`scripts/export_onnx.py`](/Users/ArwinKarir/Desktop/APS112-DL-Lighting-Camera/hallway_lighting/scripts/export_onnx.py)
+- [scripts/export_onnx.py](scripts/export_onnx.py)
 
 Example:
 

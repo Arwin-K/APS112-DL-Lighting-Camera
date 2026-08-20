@@ -4,12 +4,14 @@ Raspberry Pi inference script for hallway lighting model.
 Run this on your Raspberry Pi with a camera attached.
 """
 
+import os
+import sys
+import time
+from pathlib import Path
+
 import cv2
 import numpy as np
 import onnxruntime as ort
-from pathlib import Path
-import sys
-import time
 
 REPO_ROOT = Path(__file__).resolve().parent
 PACKAGE_ROOT = REPO_ROOT / "hallway_lighting"
@@ -26,12 +28,19 @@ IMAGENET_STD = np.asarray([0.229, 0.224, 0.225], dtype=np.float32).reshape(1, 1,
 DARK_FRAME_MEAN_THRESHOLD = 0.03
 DARK_FRAME_P95_THRESHOLD = 0.08
 
-# Load the ONNX model
-model_path = '/home/jonah/models/hallway_multitask_unet_drive_prototype.onnx'
-session = ort.InferenceSession(model_path)
+# Load the ONNX model from an environment variable when available.
+model_path = Path(os.getenv("LUMISENSE_ONNX_MODEL_PATH", str(REPO_ROOT / "hallway_lighting_runs" / "exports" / "hallway_multitask_unet_drive_prototype.onnx")))
+if not model_path.exists():
+    raise FileNotFoundError(
+        "ONNX model not found. Set LUMISENSE_ONNX_MODEL_PATH to the model path for this machine."
+    )
+session = ort.InferenceSession(str(model_path))
 input_shape = session.get_inputs()[0].shape
 MODEL_HEIGHT = int(input_shape[2])
 MODEL_WIDTH = int(input_shape[3])
+
+OUTPUT_DIR = Path(os.getenv("LUMISENSE_OUTPUT_DIR", str(REPO_ROOT / "hallway_lighting_runs" / "pi_inference")))
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 # Camera setup (adjust for your camera)
 cap = cv2.VideoCapture(0)  # 0 for default camera
@@ -99,8 +108,9 @@ while True:
     current_time = time.time()
     if current_time - last_save_time > 5:
         filename = f'presentation_image_{image_counter}.jpg'
-        cv2.imwrite(filename, frame)
-        # print(f"Saved {filename}")
+        output_path = OUTPUT_DIR / filename
+        cv2.imwrite(str(output_path), frame)
+        # print(f"Saved {output_path}")
         image_counter += 1
         last_save_time = current_time
 
